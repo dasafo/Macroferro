@@ -1,0 +1,33 @@
+category_id,name,parent_id
+1,Tornillería,
+2,Allen,1
+3,Phillips,1
+4,Pozidriv,1
+5,Torx,1
+6,Herramientas manuales,
+7,Martillos,6
+8,Llaves inglesas,6
+9,Destornilladores manuales,6
+10,Alicates,6
+11,Herramientas eléctricas,
+12,Taladros,11
+13,Amoladoras,11
+14,Sierras circulares,11
+15,Seguridad laboral,
+16,Guantes,15
+17,Gafas,15
+18,Cascos,15
+19,Adhesivos y selladores,
+20,Silicona,19
+21,Pegamento,19
+22,Ferretería básica,
+23,Bisagras,22
+24,Cadenas,22
+25,Cierres,22
+26,Pinturas y acabados,
+27,Esmalte,26
+28,Barniz,26
+29,Fontanería,
+30,Tubos PVC,29
+31,Válvulas,29
+32,Conexiones,29

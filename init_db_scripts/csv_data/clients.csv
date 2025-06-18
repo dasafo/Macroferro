@@ -1,0 +1,11 @@
+client_id,name,email,phone,address
+CUST1000,Juan Pérez,juan.perez@email.com,+34 600 123 456,"Calle Mayor 123, Madrid"
+CUST1001,María García,maria.garcia@email.com,+34 600 234 567,"Avenida Central 45, Barcelona"
+CUST1002,Carlos López,carlos.lopez@email.com,+34 600 345 678,"Plaza España 12, Valencia"
+CUST1003,Ana Martínez,ana.martinez@email.com,+34 600 456 789,"Calle Sol 67, Sevilla"
+CUST1004,Luis Rodríguez,luis.rodriguez@email.com,+34 600 567 890,"Avenida Libertad 89, Bilbao"
+CUST1005,Carmen Sánchez,carmen.sanchez@email.com,+34 600 678 901,"Calle Luna 34, Zaragoza"
+CUST1006,Miguel Torres,miguel.torres@email.com,+34 600 789 012,"Plaza Mayor 56, Málaga"
+CUST1007,Isabel Ruiz,isabel.ruiz@email.com,+34 600 890 123,"Calle Estrella 78, Murcia"
+CUST1008,Francisco Jiménez,francisco.jimenez@email.com,+34 600 901 234,"Avenida Paz 90, Alicante"
+CUST1009,Pilar Moreno,pilar.moreno@email.com,+34 600 012 345,"Calle Flores 12, Valladolid" 
