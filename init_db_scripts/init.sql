@@ -113,21 +113,21 @@ COMMENT ON CONSTRAINT fk_product_item ON invoice_items IS 'Restringe el borrado 
 
 -- El orden de carga es importante debido a las Foreign Keys.
 
-\COPY categories(category_id, name, parent_id) FROM '/docker-entrypoint-initdb.d/csv_data/category.csv' WITH CSV HEADER DELIMITER ',';
-\COPY clients(client_id, name, email, phone, address) FROM '/docker-entrypoint-initdb.d/csv_data/clients.csv' WITH CSV HEADER DELIMITER ',';
-\COPY warehouses(warehouse_id, name, address) FROM '/docker-entrypoint-initdb.d/csv_data/warehouses.csv' WITH CSV HEADER DELIMITER ',';
+COPY categories(category_id, name, parent_id) FROM '/docker-entrypoint-initdb.d/csv_data/categories.csv' WITH CSV HEADER DELIMITER ',';
+COPY clients(client_id, name, email, phone, address) FROM '/docker-entrypoint-initdb.d/csv_data/clients.csv' WITH CSV HEADER DELIMITER ',';
+COPY warehouses(warehouse_id, name, address) FROM '/docker-entrypoint-initdb.d/csv_data/warehouses.csv' WITH CSV HEADER DELIMITER ',';
 
 -- Productos depende de categories
-\COPY products(sku, category_id, name, description, price, brand, spec_json) FROM '/docker-entrypoint-initdb.d/csv_data/products.csv' WITH CSV HEADER DELIMITER ',';
+COPY products(sku, category_id, name, description, price, brand, spec_json) FROM '/docker-entrypoint-initdb.d/csv_data/products.csv' WITH CSV HEADER DELIMITER ',';
 
--- Carga de imágenes (asume images_processed.csv con sku, url, alt_text)
--- Paso 1: Crear tabla temporal para cargar el CSV pre-procesado
+-- Carga de imágenes
+-- Paso 1: Cargar el CSV de imágenes en una tabla temporal
 CREATE TEMP TABLE temp_images_load (
     sku VARCHAR(50),
     url TEXT,
     alt_text VARCHAR(255)
 );
-\COPY temp_images_load FROM '/docker-entrypoint-initdb.d/csv_data/images_processed.csv' WITH CSV HEADER DELIMITER ',';
+COPY temp_images_load FROM '/docker-entrypoint-initdb.d/csv_data/images.csv' WITH CSV HEADER DELIMITER ',';
 
 -- Paso 2: Insertar URLs únicas en la tabla 'images'
 INSERT INTO images (url, alt_text)
@@ -146,16 +146,13 @@ ON CONFLICT (sku, image_id) DO NOTHING; -- Evitar duplicados en la tabla de uni�
 DROP TABLE temp_images_load; -- Limpiar tabla temporal
 
 -- Stock depende de products y warehouses
-\COPY stock(sku, warehouse_id, quantity) FROM '/docker-entrypoint-initdb.d/csv_data/stock.csv' WITH CSV HEADER DELIMITER ',';
+COPY stock(sku, warehouse_id, quantity) FROM '/docker-entrypoint-initdb.d/csv_data/stock.csv' WITH CSV HEADER DELIMITER ',';
 
 -- Invoices depende de clients
-\COPY invoices(invoice_id, client_id, total, pdf_url, created_at) FROM '/docker-entrypoint-initdb.d/csv_data/invoices.csv' WITH CSV HEADER DELIMITER ',';
+COPY invoices(invoice_id, client_id, total, pdf_url, created_at) FROM '/docker-entrypoint-initdb.d/csv_data/invoices.csv' WITH CSV HEADER DELIMITER ',';
 
 -- Invoice_items depende de invoices y products
-\COPY invoice_items(invoice_id, sku, quantity, price_at_purchase) FROM '/docker-entrypoint-initdb.d/csv_data/invoice_items.csv' WITH CSV HEADER DELIMITER ',';
--- NOTA: Asumo que tienes un invoice_items.csv. Si no, esta línea debe ser omitida o adaptada.
--- Si invoice_items.csv no tiene item_id (porque es SERIAL), está bien.
-
+COPY invoice_items(invoice_id, sku, quantity, price_at_purchase) FROM '/docker-entrypoint-initdb.d/csv_data/invoice_items.csv' WITH CSV HEADER DELIMITER ',';
 
 -- Finalizar la transacción
 COMMIT;
