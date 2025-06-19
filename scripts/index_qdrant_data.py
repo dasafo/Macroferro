@@ -1,361 +1,297 @@
 # macroferro_project/scripts/index_qdrant_data.py
 
 """
-Script de Indexación para Qdrant y OpenAI
+Script de Indexación para Qdrant y OpenAI con Enriquecimiento LLM y Caché Redis
 
 Propósito:
 Este script se encarga de extraer datos de productos desde una base de datos 
-PostgreSQL, generar embeddings semánticos para cada producto utilizando la API 
-de OpenAI, y finalmente indexar estos embeddings en una colección de Qdrant. 
-El objetivo es preparar los datos para realizar búsquedas semánticas eficientes.
+PostgreSQL, generar descripciones semánticas enriquecidas para cada producto 
+utilizando un LLM (GPT-3.5-Turbo), cachear estas descripciones en Redis para
+evitar llamadas redundantes, generar embeddings con la API de OpenAI, y finalmente 
+indexar estos embeddings en una colección de Qdrant.
 
 Flujo de Operaciones:
-1.  Configuración Inicial: Carga variables de entorno (claves de API, URLs de BD).
-2.  Conexión a Bases de Datos: Establece conexión con PostgreSQL y Qdrant.
-3.  Extracción de Datos: Obtiene todos los productos de la tabla `products` en PostgreSQL.
-4.  Preparación de Texto: Combina campos relevantes de cada producto (nombre, 
-    descripción, marca, categoría, especificaciones) en un único texto cohesivo.
-5.  Generación de Embeddings: Envía el texto de cada producto a la API de OpenAI 
-    para obtener un vector de embedding que capture su significado semántico.
-6.  Gestión de Colección en Qdrant: Se asegura de que la colección en Qdrant 
-    exista y esté configurada correctamente. Por defecto, la recrea para 
-    garantizar una indexación limpia.
-7.  Indexación (Upsert): Sube los embeddings y metadatos asociados a Qdrant 
-    en lotes, usando el SKU del producto como identificador único.
+1.  Configuración y Conexiones: Carga variables de entorno y establece 
+    conexiones con PostgreSQL, Qdrant, Redis y OpenAI.
+2.  Manejo de Estado: Lee un timestamp de un fichero local para saber desde
+    cuándo buscar productos nuevos o modificados.
+3.  Extracción de Datos: Obtiene solo los productos actualizados desde la
+    última ejecución exitosa.
+4.  Procesamiento Concurrente por Producto:
+    a.  Caché (Redis): Para cada producto, comprueba si ya existe una 
+        descripción semántica generada para su versión actual.
+    b.  Enriquecimiento (LLM): Si no está en caché, llama a la API de OpenAI
+        para generar un párrafo de marketing optimizado. Se reintenta con
+        backoff exponencial en caso de errores de rate limit.
+    c.  Guardado en Caché: Almacena la nueva descripción en Redis.
+    d.  Fallback: Si el LLM falla por cualquier otra razón, se usa una 
+        descripción simple (nombre + descripción).
+    e.  Generación de Embedding: Usa el texto (enriquecido o de fallback)
+        para generar un vector de embedding.
+    f.  Preparación de Punto: Crea un objeto `PointStruct` para Qdrant.
+5.  Indexación (Upsert): Sube todos los puntos generados a Qdrant en un único
+    lote eficiente.
+6.  Guardado de Estado: Si la indexación fue exitosa Y NO HUBO ERRORES, 
+    guarda el timestamp actual para la próxima ejecución.
 
 Requisitos Previos:
--   Un archivo `.env` en la raíz del proyecto con las siguientes variables:
-    - `DATABASE_URL`: Cadena de conexión a PostgreSQL.
-    - `OPENAI_API_KEY`: Clave de la API de OpenAI.
-    - `QDRANT_HOST`, `QDRANT_PORT_REST`, `QDRANT_PORT_GRPC`: Host y puertos de Qdrant.
-    - `QDRANT_API_KEY` (opcional si Qdrant no requiere autenticación).
--   Los contenedores de PostgreSQL y Qdrant deben estar en ejecución.
--   La base de datos PostgreSQL debe tener la tabla `products` poblada.
+-   Un archivo `.env` configurado.
+-   Contenedores de PostgreSQL, Qdrant y Redis en ejecución.
 """
-
 import asyncio
+import json
+import uuid
+import logging
 import os
 import sys
-import json
-import uuid # Importar la librería para generar UUIDs
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List, Dict, Any, Tuple
+
+from qdrant_client import AsyncQdrantClient, models
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
-from dotenv import load_dotenv
-from openai import AsyncOpenAI # Cambiado a AsyncOpenAI para operaciones concurrentes
-from qdrant_client import QdrantClient, models as qdrant_models
+from sqlalchemy.orm import sessionmaker, Session
+from openai import AsyncOpenAI, RateLimitError, APIError
+from redis.asyncio import Redis
 
-# Añadir el directorio del proyecto al PYTHONPATH para poder importar módulos de la app
-# Esto es necesario si ejecutas el script directamente y no como un módulo dentro de la app
+# Añadir el directorio del proyecto al PYTHONPATH
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.append(project_root)
+sys.path.insert(0, project_root)
 
-from app.core.config import settings # Importar configuración de la app
-# Necesitaremos los modelos de producto para obtener los datos
-# from app.db.models import Product # Si quisieras usar SQLAlchemy ORM completo
+from app.core.config import Settings
 
 # --- Configuración ---
-QDRANT_HOST = settings.QDRANT_HOST
-QDRANT_PORT_REST = settings.QDRANT_PORT_REST
-QDRANT_PORT_GRPC = settings.QDRANT_PORT_GRPC
-QDRANT_COLLECTION_NAME = "macroferro_products"
-OPENAI_EMBEDDING_MODEL = "text-embedding-3-small" # Modelo de embedding recomendado y más nuevo/eficiente
-EMBEDDING_DIM = 1536 # Para text-embedding-3-small. Verifica la dimensión para el modelo que uses
-                    # text-embedding-ada-002 tiene 1536
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- Fichero de Estado para Sincronización ---
-# Este fichero guardará la fecha de la última ejecución exitosa para procesar solo los cambios.
-STATE_FILE_PATH = os.path.join(project_root, "scripts", "indexing_state.json")
+# --- Constantes ---
+COLLECTION_NAME = "macroferro_products"
+EMBEDDING_MODEL = "text-embedding-3-small"
+LLM_MODEL = "gpt-4o-mini-2024-07-18"
+EMBEDDING_DIM = 1536
+STATE_FILE_PATH = "scripts/indexing_state.json"
 
-# Conexión a PostgreSQL (usando SQLAlchemy core para una consulta simple)
-# Asegúrate de que DATABASE_URL esté correctamente configurada en tu .env y settings
-engine = create_engine(str(settings.DATABASE_URL)) # SQLAlchemy 2.0 prefiere str()
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# --- Clientes (inicializados en main) ---
+settings = Settings()
+openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=5, timeout=60.0)
+redis_client: Optional[Redis] = None
+qdrant_client: Optional[AsyncQdrantClient] = None
 
-def get_products_from_db(db_session, since_timestamp: Optional[str] = None):
-    """
-    Obtiene productos de la BD, opcionalmente solo los actualizados desde una fecha.
-    
-    Si se proporciona `since_timestamp`, la función solo devolverá los productos
-    cuya columna `updated_at` sea más reciente que la fecha proporcionada.
-    
-    Args:
-        db_session: Una sesión activa de SQLAlchemy.
-        since_timestamp (str, optional): Timestamp en formato ISO 8601.
-        
-    Returns:
-        Una lista de diccionarios, donde cada diccionario representa un producto.
-        
-    **Requisito**: La tabla 'products' debe tener una columna 'updated_at' que
-    se actualice en cada modificación para que la sincronización funcione.
-    """
-    base_query = """
+# --- Manejo de Estado ---
+def get_last_run_timestamp() -> Optional[datetime]:
+    """Lee el timestamp de la última ejecución exitosa."""
+    if not os.path.exists(STATE_FILE_PATH):
+        logging.info("No se encontró el fichero de estado. Se procesarán todos los productos.")
+        return None
+    try:
+        with open(STATE_FILE_PATH, 'r') as f:
+            data = json.load(f)
+            ts_str = data.get("last_run_timestamp")
+            if ts_str:
+                return datetime.fromisoformat(ts_str)
+    except (json.JSONDecodeError, FileNotFoundError):
+        logging.warning("Fichero de estado corrupto o no encontrado. Se procesarán todos los productos.")
+    return None
+
+def save_last_run_timestamp():
+    """Guarda el timestamp de la ejecución actual."""
+    state = {"last_run_timestamp": datetime.now(timezone.utc).isoformat()}
+    with open(STATE_FILE_PATH, 'w') as f:
+        json.dump(state, f, indent=4)
+    logging.info("Timestamp de la ejecución guardado correctamente.")
+
+# --- Lógica Principal ---
+async def get_db_connection() -> Session:
+    """Establece y devuelve una conexión a la base de datos."""
+    engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    return SessionLocal()
+
+def get_products(db: Session, last_run: Optional[datetime]) -> List[Dict[str, Any]]:
+    """Obtiene productos de la BD que han sido actualizados desde la última ejecución."""
+    query_str = """
         SELECT 
             p.sku, 
-            p.name, 
-            p.description, 
-            p.brand, 
-            c.name as category_name,
-            p.spec_json
+            p.name AS name_cleaned, 
+            p.description AS description_cleaned, 
+            p.brand AS brand_name, 
+            c.name AS category_name,
+            p.updated_at,
+            p.spec_json as attributes
         FROM products p
         LEFT JOIN categories c ON p.category_id = c.category_id
     """
-    
-    if since_timestamp:
-        # Añade la condición para obtener solo los productos modificados recientemente.
-        query = text(base_query + " WHERE p.updated_at > :since_timestamp")
-        result = db_session.execute(query, {"since_timestamp": since_timestamp})
-        print(f"Obteniendo productos actualizados desde {since_timestamp}...")
-    else:
-        # Si no hay fecha, obtiene todos los productos (para la primera ejecución).
-        query = text(base_query + ";")
-        result = db_session.execute(query)
-        print("Obteniendo todos los productos (primera ejecución o reinicio)...")
+    params = {}
+    if last_run:
+        query_str += " WHERE p.updated_at > :last_run"
+        params["last_run"] = last_run
 
-    products = [dict(row._mapping) for row in result]
-    return products
+    query = text(query_str)
+    result = db.execute(query, params).mappings().all()
+    logging.info(f"Se encontraron {len(result)} productos para procesar.")
+    return result
 
-def create_text_for_embedding(product_data: dict) -> str:
+async def get_llm_description(product: Dict[str, Any]) -> Tuple[str, bool]:
     """
-    Crea un string de texto unificado a partir de los datos de un producto.
-    
-    Este texto combinado será el que se envíe a OpenAI para generar el embedding.
-    La calidad y estructura de este texto son cruciales para la relevancia de las
-    búsquedas semánticas. Unir campos clave con separadores ayuda al modelo a
-    distinguir la semántica de cada parte.
-    
-    Args:
-        product_data: Un diccionario con los datos de un producto.
-        
-    Returns:
-        Un string único que representa al producto.
+    Obtiene la descripción de un producto, ya sea de caché o generada por LLM.
+    Devuelve la descripción y un booleano indicando si hubo un error.
     """
-    # Lista de los campos de texto más importantes del producto.
-    parts = [
-        f"Nombre: {product_data.get('name', '')}",
-        f"Descripción: {product_data.get('description', '')}",
-        f"Marca: {product_data.get('brand', '')}",
-        f"Categoría: {product_data.get('category_name', '')}"
-    ]
-    
-    # Procesa las especificaciones técnicas (spec_json) si existen.
-    # Esto enriquece el embedding con detalles técnicos específicos.
-    spec_json = product_data.get("spec_json")
-    if isinstance(spec_json, dict):
-        spec_parts = [f"{key}: {value}" for key, value in spec_json.items()]
-        if spec_parts:
-            parts.append(f"Especificaciones: {' | '.join(spec_parts)}")
+    if not redis_client:
+        return f"{product['name_cleaned']} {product['description_cleaned']}", True
 
-    # `filter(None, parts)` elimina strings vacíos si algún campo es nulo.
-    # ` " | ".join(...)` une todas las partes en un único string, fácil de procesar por el modelo.
-    return " | ".join(filter(None, parts)).strip()
-
-async def process_product_embedding(product: dict, openai_client: AsyncOpenAI) -> Optional[qdrant_models.PointStruct]:
-    """
-    Genera el embedding para un único producto y devuelve un PointStruct de Qdrant.
-    
-    Esta función encapsula la lógica para un solo producto, permitiendo su ejecución
-    concurrente.
-    
-    Args:
-        product: Diccionario con los datos del producto.
-        openai_client: Cliente asíncrono de OpenAI.
-        
-    Returns:
-        Un objeto PointStruct listo para ser insertado en Qdrant, o None si ocurre un error.
-    """
-    text_to_embed = create_text_for_embedding(product)
-    if not text_to_embed:
-        print(f"Advertencia: No se pudo generar texto para el SKU {product['sku']}. Se omite.")
-        return None
-    
+    cache_key = f"product_description:{LLM_MODEL}:{product['sku']}"
     try:
-        # Llamada asíncrona a la API de OpenAI
-        response = await openai_client.embeddings.create(
-            input=[text_to_embed],
-            model=OPENAI_EMBEDDING_MODEL
-        )
-        embedding = response.data[0].embedding
-        
-        # Guardamos el SKU y otros datos importantes en el payload.
-        payload = {
-            "sku": product.get("sku"), # <-- Guardamos el SKU aquí
-            "name": product.get("name"),
-            "brand": product.get("brand"),
-            "category_name": product.get("category_name"),
-        }
-        
-        # Generamos un UUID para usarlo como ID del punto, como requiere Qdrant.
-        # Usamos un UUID version 5, que es determinista a partir de un namespace y un nombre.
-        # Esto garantiza que el mismo SKU siempre generará el mismo UUID.
-        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, product["sku"]))
-
-        return qdrant_models.PointStruct(
-            id=point_id, # Usamos el UUID generado como ID
-            vector=embedding,
-            payload=payload
-        )
+        cached_description = await redis_client.get(cache_key)
+        if cached_description:
+            logging.info(f"Cache HIT para SKU: {product['sku']}")
+            return cached_description.decode('utf-8'), False
     except Exception as e:
-        print(f"Error procesando el SKU {product['sku']}: {e}")
-        return None
+        logging.error(f"Error al leer de Redis para SKU {product['sku']}: {e}")
 
-# --- Funciones para Manejar el Estado de Sincronización ---
+    logging.info(f"Cache MISS para SKU: {product['sku']}. Generando nueva descripción con LLM.")
+    prompt = f"""
+    Eres un experto en marketing para una ferretería industrial. Genera una descripción de producto atractiva y rica en semántica para el siguiente artículo.
+    Enfócate en los casos de uso, beneficios y posibles aplicaciones profesionales. No incluyas el nombre del producto ni el SKU en la descripción.
+    Sé conciso y directo, utilizando un máximo de 150 palabras.
 
-def read_last_run_timestamp() -> Optional[str]:
-    """Lee la fecha de la última ejecución del fichero de estado."""
+    Producto:
+    - Nombre: {product.get('name_cleaned', 'N/A')}
+    - Descripción: {product.get('description_cleaned', 'N/A')}
+    - Marca: {product.get('brand_name', 'N/A')}
+    - Categoría: {product.get('category_name', 'N/A')}
+    - Atributos: {', '.join([f'{k}: {v}' for k, v in (product.get('attributes') or {}).items()])}
+    """
     try:
-        with open(STATE_FILE_PATH, "r") as f:
-            state = json.load(f)
-            return state.get("last_successful_run")
-    except (FileNotFoundError, json.JSONDecodeError):
-        # Si el fichero no existe o está corrupto, es como si fuera la primera vez.
-        print("Fichero de estado no encontrado o inválido. Se procesarán todos los productos.")
-        return None
+        response = await openai_client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=250
+        )
+        description = response.choices[0].message.content.strip()
+        try:
+            await redis_client.set(cache_key, description, ex=3600 * 24 * 7)  # Cache por 1 semana
+            logging.info(f"Descripción para SKU {product['sku']} guardada en caché.")
+        except Exception as e:
+            logging.error(f"Error al escribir en Redis para SKU {product['sku']}: {e}")
+        return description, False
+    except (RateLimitError, APIError) as e:
+        logging.warning(f"Error de API (RateLimit/APIError) para SKU {product['sku']}: {e}. Se usará fallback.")
+        return f"{product['name_cleaned']} {product['description_cleaned']}", True
+    except Exception as e:
+        logging.error(f"Error inesperado al generar descripción para SKU {product['sku']}: {e}. Se usará fallback.")
+        return f"{product['name_cleaned']} {product['description_cleaned']}", True
 
-def save_last_run_timestamp(timestamp: str):
-    """Guarda la fecha de la ejecución actual en el fichero de estado."""
-    with open(STATE_FILE_PATH, "w") as f:
-        json.dump({"last_successful_run": timestamp}, f)
-    print(f"Estado de sincronización guardado. Última ejecución: {timestamp}")
+async def process_product(product: Dict[str, Any]) -> Tuple[Optional[models.PointStruct], bool]:
+    """
+    Procesa un solo producto: obtiene descripción, genera embedding y crea el punto para Qdrant.
+    Devuelve el punto y un booleano indicando si hubo error.
+    """
+    description, has_error = await get_llm_description(product)
+    
+    text_to_embed = f"Nombre: {product['name_cleaned']}\nDescripción: {description}\nMarca: {product.get('brand_name', 'N/A')}\nCategoría: {product.get('category_name', 'N/A')}"
+
+    try:
+        embedding_response = await openai_client.embeddings.create(
+            input=[text_to_embed],
+            model=EMBEDDING_MODEL
+        )
+        vector = embedding_response.data[0].embedding
+    except Exception as e:
+        logging.error(f"No se pudo generar embedding para SKU {product['sku']}: {e}")
+        return None, True
+
+    point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(product['sku'])))
+    payload = {
+        "sku": product["sku"],
+        "name": product["name_cleaned"],
+        "brand": product.get("brand_name"),
+        "category": product.get("category_name"),
+        "updated_at": product["updated_at"].isoformat(),
+        "source_description": product["description_cleaned"],
+        "llm_description": description if not has_error else None,
+    }
+    point = models.PointStruct(id=point_id, vector=vector, payload=payload)
+    return point, has_error
+
+async def setup_qdrant_collection():
+    """Asegura que la colección en Qdrant exista con la configuración correcta."""
+    if not qdrant_client:
+        return
+    try:
+        await qdrant_client.get_collection(collection_name=COLLECTION_NAME)
+        logging.info(f"La colección '{COLLECTION_NAME}' ya existe.")
+    except Exception:
+        logging.info(f"La colección '{COLLECTION_NAME}' no existe, creándola.")
+        await qdrant_client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=models.VectorParams(size=EMBEDDING_DIM, distance=models.Distance.COSINE),
+        )
+        logging.info(f"Colección '{COLLECTION_NAME}' creada.")
 
 async def main():
-    """Función principal que orquesta todo el proceso de indexación."""
-    print("Iniciando proceso de indexación en Qdrant...")
+    """Función principal del script de indexación."""
+    global redis_client, qdrant_client
     
-    # Guardamos la hora de inicio para registrarla si todo sale bien.
-    # Usamos timezone.utc para asegurar consistencia independientemente del servidor.
-    start_time_iso = datetime.now(timezone.utc).isoformat()
-
-    # --- 1. Inicializar Clientes de API ---
+    logging.info("--- Iniciando script de indexación ---")
+    
+    db = None
+    any_errors = False
+    
     try:
-        # Cliente de OpenAI: se usará para generar los embeddings.
-        # Requiere que la variable de entorno OPENAI_API_KEY esté configurada.
-        openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        if not settings.OPENAI_API_KEY:
-            raise ValueError("La variable de entorno OPENAI_API_KEY no está configurada.")
-            
-        # Cliente de Qdrant: se usará para interactuar con la base de datos de vectores.
-        # Se conecta usando el host y el puerto gRPC para evitar ambigüedades.
-        qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT_GRPC, api_key=settings.QDRANT_API_KEY)
-        print(f"Conectado a Qdrant en {QDRANT_HOST}:{QDRANT_PORT_GRPC} (gRPC)")
-    except Exception as e:
-        print(f"Error fatal al inicializar los clientes: {e}")
-        return
-
-    # --- 2. Obtener Productos de PostgreSQL (solo los actualizados) ---
-    last_run = read_last_run_timestamp()
-    db_session = SessionLocal()
-    try:
-        # Pasamos la fecha de la última ejecución a la función de obtención de datos.
-        products_data = get_products_from_db(db_session, since_timestamp=last_run)
+        # --- Conexiones ---
+        db = await get_db_connection()
+        redis_client = Redis.from_url(f"redis://{settings.REDIS_HOST}", decode_responses=False)
+        qdrant_client = AsyncQdrantClient(host=settings.QDRANT_HOST, port=settings.QDRANT_PORT_GRPC, api_key=settings.QDRANT_API_KEY)
         
-        if not products_data:
-            print("No se encontraron productos nuevos o actualizados para procesar. Finalizando script.")
-            # Guardamos la hora actual para que la próxima ejecución empiece desde ahora.
-            save_last_run_timestamp(start_time_iso)
+        await setup_qdrant_collection()
+        
+        # --- Obtener productos ---
+        last_run = get_last_run_timestamp()
+        products = get_products(db, last_run)
+        
+        if not products:
+            logging.info("No hay productos nuevos o actualizados para procesar.")
+            save_last_run_timestamp() # Guardamos timestamp para no re-escanear en vano
             return
-            
-        print(f"Se encontraron {len(products_data)} productos para procesar.")
-    except Exception as e:
-        print(f"Error fatal al obtener productos de la base de datos: {e}")
-        return
-    finally:
-        # Es crucial cerrar la sesión de la base de datos para liberar la conexión.
-        db_session.close()
 
-    # --- 3. Asegurar la Existencia de la Colección en Qdrant (sin recrearla) ---
-    try:
-        print(f"Verificando y preparando la colección '{QDRANT_COLLECTION_NAME}' en Qdrant...")
-        collections_response = qdrant_client.get_collections()
-        collection_names = [col.name for col in collections_response.collections]
+        # --- Procesamiento y carga ---
+        tasks = [process_product(p) for p in products]
+        results = await asyncio.gather(*tasks)
 
-        if QDRANT_COLLECTION_NAME not in collection_names:
-            print(f"La colección '{QDRANT_COLLECTION_NAME}' no existe. Se procederá a crearla.")
-            # Crea la colección solo si no existe.
-            qdrant_client.create_collection(
-                collection_name=QDRANT_COLLECTION_NAME,
-                vectors_config=qdrant_models.VectorParams(size=EMBEDDING_DIM, distance=qdrant_models.Distance.COSINE)
+        points_to_upload = []
+        for point, error in results:
+            if point:
+                points_to_upload.append(point)
+            if error:
+                any_errors = True
+
+        if points_to_upload:
+            logging.info(f"Subiendo {len(points_to_upload)} puntos a Qdrant...")
+            await qdrant_client.upsert(
+                collection_name=COLLECTION_NAME,
+                points=points_to_upload,
+                wait=True
             )
-            print("Colección creada exitosamente.")
+            logging.info("Puntos subidos exitosamente a Qdrant.")
         else:
-            print(f"La colección '{QDRANT_COLLECTION_NAME}' ya existe. Se procederá a actualizarla (upsert).")
+            logging.info("No hay puntos para subir a Qdrant.")
             
+        # --- Guardado de estado ---
+        if not any_errors:
+            save_last_run_timestamp()
+        else:
+            logging.warning("Se encontraron errores durante el procesamiento. El timestamp no se guardará para reintentar los fallos en la próxima ejecución.")
+
     except Exception as e:
-        print(f"Error fatal manejando la colección de Qdrant: {e}")
-        return
-
-    # --- 4. Generar Embeddings e Indexar en Qdrant (de forma concurrente) ---
-    print("Iniciando generación de embeddings concurrentes...")
-    
-    # Crear una lista de tareas asíncronas, una para cada producto.
-    # Cada tarea llamará a la API de OpenAI para obtener el embedding.
-    tasks = [process_product_embedding(product, openai_client) for product in products_data]
-    
-    # Ejecutar todas las tareas en paralelo usando asyncio.gather.
-    # Esto es mucho más rápido que hacerlo secuencialmente.
-    # `return_exceptions=True` evita que una tarea fallida detenga todo el proceso.
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    # Procesar los resultados: separar los puntos válidos de los errores.
-    points_to_upsert = []
-    failed_skus = 0
-    for i, res in enumerate(results):
-        if isinstance(res, qdrant_models.PointStruct):
-            points_to_upsert.append(res)
-        else:
-            # Si `res` no es un PointStruct, es un error (None o una excepción).
-            failed_skus += 1
-            sku = products_data[i].get('sku', 'desconocido')
-            print(f"  Fallo al procesar SKU {sku}. Razón: {res}")
-            
-    print(f"Generación de embeddings completada. Puntos válidos: {len(points_to_upsert)}. Fallos: {failed_skus}.")
-
-    # --- 5. Subir Puntos a Qdrant en Lotes (Batch Upsert) ---
-    if points_to_upsert:
-        print(f"Subiendo {len(points_to_upsert)} puntos a Qdrant en lotes...")
-        try:
-            # Subir los puntos en lotes es mucho más eficiente que subirlos de uno en uno.
-            batch_size = 100 
-            for i in range(0, len(points_to_upsert), batch_size):
-                batch = points_to_upsert[i:i + batch_size]
-                # `upsert` inserta nuevos puntos o actualiza los existentes si el ID ya está.
-                # `wait=True` hace que la llamada sea bloqueante hasta que la operación se complete.
-                qdrant_client.upsert(collection_name=QDRANT_COLLECTION_NAME, points=batch, wait=True)
-                print(f"  Lote de {len(batch)} puntos subido correctamente.")
-            print("¡Indexación completada! Todos los puntos han sido subidos a Qdrant.")
-        except Exception as e:
-            print(f"Error fatal durante la subida de puntos a Qdrant: {e}")
-            return # Si la subida falla, no actualizamos el timestamp para poder reintentar.
-    else:
-        print("No se generaron puntos válidos para subir. Verifique los datos de origen y los logs.")
-
-    # Si todo el proceso ha sido exitoso, guardamos la fecha de esta ejecución.
-    save_last_run_timestamp(start_time_iso)
-    
-    print("Proceso de indexación finalizado.")
-
-# --- Manejo de Eliminaciones (Mejora Futura) ---
-# Este script ahora maneja creaciones y actualizaciones. Para manejar eliminaciones,
-# se podría implementar una estrategia de "soft delete" en la base de datos:
-# 1. Añadir una columna `is_deleted` (boolean) a la tabla `products`.
-# 2. En lugar de borrar un producto, se marcaría `is_deleted = true`.
-# 3. Este script podría tener un paso adicional que:
-#    a. Consulte los productos marcados como eliminados desde la última ejecución.
-#    b. Use `qdrant_client.delete(collection_name=..., points_selector=...)`
-#       para eliminarlos de Qdrant usando sus SKUs.
+        logging.critical(f"Ha ocurrido un error crítico en el script: {e}", exc_info=True)
+    finally:
+        # --- Cierre de conexiones ---
+        if db:
+            db.close()
+        if redis_client:
+            await redis_client.aclose()
+        if qdrant_client:
+            await qdrant_client.close()
+        logging.info("--- Script de indexación finalizado ---")
 
 if __name__ == "__main__":
-    # Este bloque se ejecuta solo cuando el script es llamado directamente.
-    
-    # Contexto sobre asincronía:
-    # La librería `openai` v1.x.x realiza llamadas de red síncronas por defecto.
-    # En un script de ejecución única como este, una ejecución síncrona es aceptable.
-    # Si este proceso se integrara en una aplicación asíncrona (como FastAPI),
-    # o si se procesaran cientos de miles de productos, sería recomendable usar
-    # un cliente asíncrono (`AsyncOpenAI`) para no bloquear el bucle de eventos.
-    
-    # Usamos `asyncio.run()` para ejecutar la función `main` que hemos definido como `async`.
-    # Aunque las llamadas a la API son síncronas, esto establece un buen patrón
-    # si en el futuro se añaden operaciones asíncronas.
     asyncio.run(main())

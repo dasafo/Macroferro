@@ -232,4 +232,11 @@ quick-start: ## ⚡ Inicio rápido (clean + build + up)
 stop-all: ## ⏹️ Parar todos los contenedores de Docker
 	@echo "$(YELLOW)⏹️ Parando todos los contenedores de Docker...$(NC)"
 	docker stop $$(docker ps -q) 2>/dev/null || echo "No hay contenedores ejecutándose"
-	@echo "$(GREEN)✅ Todos los contenedores detenidos$(NC)" 
+	@echo "$(GREEN)✅ Todos los contenedores detenidos$(NC)"
+
+## 🤖 Inteligencia Artificial
+update-catalog: ## 🔄 Actualizar el catálogo de productos con IA (descripciones y embeddings)
+	@echo "$(YELLOW)🤖 Actualizando catálogo de productos con IA...$(NC)"
+	@echo "$(BLUE)🔍 Ejecutando script de indexación...$(NC)"
+	docker exec $(BACKEND_CONTAINER) python scripts/index_qdrant_data.py
+	@echo "$(GREEN)✅ Catálogo actualizado correctamente$(NC)" 

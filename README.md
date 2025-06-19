@@ -11,14 +11,14 @@ La arquitectura se basa en un enfoque moderno de servicios contenerizados para g
 -   **Contenerización:** Docker, Docker Compose
 -   **Base de Datos Relacional:** PostgreSQL 16
 -   **Gestión de BD:** PgAdmin 4
--   **Base de Datos Vectorial:** Qdrant (para búsquedas semánticas futuras)
+-   **Base de Datos Vectorial:** Qdrant (para búsqueda semántica)
 -   **Caché en Memoria:** Redis (para sesiones y caché)
 -   **Backend API:** FastAPI (Python 3.9)
 -   **ORM:** SQLAlchemy 2.0 con modelos declarativos
 -   **Validación:** Pydantic v2 para esquemas y validación de datos
 -   **Orquestación/Workflow:** n8n (para el bot - fase futura)
 -   **Interacción con Usuario:** Bot de Telegram (fase futura)
--   **IA (Embeddings & Consultas):** OpenAI API (fase futura)
+-   **IA (Embeddings & Consultas):** OpenAI API
 -   **Exposición Local (Desarrollo):** ngrok (fase futura)
 
 ---
@@ -149,6 +149,20 @@ backend/
 - **600+ registros de stock** distribuidos
 - **51 facturas** con 31 items de prueba
 
+### ✅ **FASE 1.5: Indexación Semántica con IA** - **COMPLETADA**
+
+Se ha desarrollado un script robusto para la indexación de productos en la base de datos vectorial Qdrant, sentando las bases para la búsqueda semántica.
+
+**Funcionalidades Clave:**
+- ✅ **Script de Indexación (`scripts/index_qdrant_data.py`):**
+  - **Conexión multi-servicio:** PostgreSQL, Redis, Qdrant y OpenAI.
+  - **Enriquecimiento con LLM:** Genera descripciones de marketing optimizadas para cada producto usando `gpt-4o-mini-2024-07-18`.
+  - **Caché Inteligente:** Utiliza Redis para cachear las descripciones generadas, ahorrando costes y tiempo.
+  - **Generación de Embeddings:** Convierte la información del producto en vectores semánticos con `text-embedding-3-small`.
+  - **Indexación en Qdrant:** Almacena los productos como puntos vectoriales en la colección `macroferro_products`.
+  - **Gestión de Estado:** Solo procesa productos nuevos o modificados desde la última ejecución.
+- ✅ **Comando `Makefile` (`make update-catalog`):** Permite ejecutar todo el proceso de indexación con una sola instrucción.
+
 ---
 
 ## Estado de Desarrollo por Módulos
@@ -169,7 +183,9 @@ backend/
 - [ ] **API de clientes** (gestión B2B)
 - [ ] **API de facturación** (órdenes y pagos)
 - [ ] **Sistema de autenticación** (JWT, roles)
-- [ ] **Búsqueda semántica** (Qdrant + OpenAI)
+- [🚧] **Búsqueda semántica** (Qdrant + OpenAI)
+  - **Completado:** Lógica de indexación, enriquecimiento y vectorización.
+  - **Pendiente:** Endpoint en la API para realizar las búsquedas.
 - [ ] **Bot de Telegram** (interfaz conversacional)
 - [ ] **Dashboard administrativo** (gestión web)
 
@@ -261,7 +277,7 @@ curl http://localhost:8000/api/v1/categories/
 
 ### Gestión del Entorno
 
-**Comandos útiles:**
+**Comandos útiles con `docker compose`:**
 ```bash
 # Parar todos los servicios
 docker compose down
@@ -277,6 +293,23 @@ docker exec -it macroferro_backend bash
 
 # Reiniciar un servicio específico
 docker compose restart backend
+```
+
+**Comandos útiles con `Makefile`:**
+El proyecto incluye un `Makefile` para simplificar las operaciones comunes. Ejecuta `make help` para ver todos los comandos. Los más importantes son:
+
+```bash
+# Levantar todos los servicios
+make up
+
+# Detener todos los servicios
+make down
+
+# Ver logs del backend en tiempo real
+make logs-backend
+
+# Actualizar el catálogo de productos con IA
+make update-catalog
 ```
 
 ---
