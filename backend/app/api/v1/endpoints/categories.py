@@ -36,7 +36,7 @@ from typing import List, Optional
 
 from app.api import deps # Importamos get_db desde deps.py para inyección de dependencias
 from app.schemas import category as category_schema # Schemas Pydantic para validación y serialización
-from app.services import category_service # Capa de servicios con lógica de negocio
+from app.services.category_service import category_service # Capa de servicios con lógica de negocio
 # from app.core.exceptions import NotFoundError, DuplicateError # Para manejo de errores personalizado futuro
 
 # Configuración del router para agrupar endpoints relacionados con categorías
@@ -295,85 +295,55 @@ async def read_categories(
     main_categories_only: bool = False  # Query parameter: solo categorías raíz
 ) -> List[category_schema.CategoryResponse]:
     """
-    Obtiene una lista de categorías con múltiples opciones de filtrado.
+    Obtiene una lista de categorías con filtros y paginación.
+
+    Permite filtrar por categorías principales o subcategorías de un padre.
     
-    Este endpoint flexible permite diferentes tipos de consultas según los parámetros:
-    - Lista completa paginada (sin filtros)
-    - Solo categorías principales/raíz (main_categories_only=true)
-    - Subcategorías de un padre específico (parent_id=X)
+    **Casos de uso:**
+    - `GET /`: Lista todas las categorías paginadas.
+    - `GET /?main_categories_only=true`: Lista solo categorías raíz.
+    - `GET /?parent_id=1`: Lista las subcategorías de la categoría con ID 1.
     
-    **Modos de operación:**
-    
-    1. **Categorías principales** (`main_categories_only=true`):
-       - Devuelve solo categorías raíz (parent_id is NULL)
-       - Ideal para menús de navegación principal
-       - Ignora parámetros de paginación
-    
-    2. **Subcategorías** (`parent_id=X`):
-       - Devuelve hijas directas de la categoría especificada
-       - Valida que la categoría padre exista
-       - Útil para navegación jerárquica incremental
-    
-    3. **Lista general** (sin filtros especiales):
-       - Devuelve todas las categorías con paginación
-       - Respeta skip y limit para paginación eficiente
-       - Ordenamiento según implementación de la capa de servicio
-    
-    **Query Parameters:**
-    - `skip`: Número de registros a omitir (default: 0)
-    - `limit`: Máximo de registros a devolver (default: 100)
-    - `parent_id`: ID de categoría padre para filtrar subcategorías
-    - `main_categories_only`: Si true, devuelve solo categorías raíz
-    
-    **Códigos de estado:**
-    - 200: Lista devuelta exitosamente (puede estar vacía)
-    - 404: Categoría padre no encontrada (cuando se usa parent_id)
-    - 422: Parámetros de consulta inválidos
-    
-    **Optimizaciones aplicadas:**
-    - Paginación eficiente para evitar sobrecarga de memoria
-    - Consultas optimizadas según el tipo de filtro aplicado
-    - Validación previa de existencia del padre para evitar consultas vacías
-    
-    **Casos de uso típicos:**
-    - `/categories/` → Lista completa paginada
-    - `/categories/?main_categories_only=true` → Menú principal
-    - `/categories/?parent_id=5` → Subcategorías de categoría 5
-    - `/categories/?skip=20&limit=10` → Página 3 con 10 elementos por página
+    **Validaciones:**
+    - `parent_id` y `main_categories_only` son mutuamente excluyentes.
+    - El endpoint asegura que solo se aplique un filtro a la vez.
     
     Args:
-        db: Sesión de SQLAlchemy
+        db: Sesión de SQLAlchemy inyectada
         skip: Offset para paginación
-        limit: Límite de registros
-        parent_id: ID de categoría padre (opcional)
+        limit: Límite de resultados
+        parent_id: ID de la categoría padre para filtrar subcategorías
         main_categories_only: Flag para obtener solo categorías raíz
         
     Returns:
-        List[CategoryResponse]: Lista de categorías según filtros aplicados
+        Lista de categorías según los filtros aplicados.
         
     Raises:
-        HTTPException: 404 si parent_id especificado no existe
+        HTTPException 400: Si se usan `parent_id` y `main_categories_only` juntos.
     """
-    # MODO 1: Solo categorías principales/raíz
+    # Validación para asegurar que los filtros no se contradigan
+    if main_categories_only and parent_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot use 'parent_id' and 'main_categories_only' filters simultaneously."
+        )
+
+    # Delegación a la capa de servicio según el filtro aplicado
     if main_categories_only:
-        categories = category_service.get_main_categories(db=db)
-    
-    # MODO 2: Subcategorías de un padre específico
+        # Llama al servicio para obtener solo las categorías principales
+        categories = category_service.get_main_categories(db=db, skip=skip, limit=limit)
     elif parent_id is not None:
-        # VALIDACIÓN PREVIA: Verificar que la categoría padre existe
-        # Esto proporciona un error más claro que devolver una lista vacía
-        parent_cat = category_service.get_category_by_id(db, category_id=parent_id)
-        if not parent_cat:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, 
-                detail=f"Parent category with ID {parent_id} not found"
-            )
-        categories = category_service.get_subcategories(db=db, parent_id=parent_id)
-    
-    # MODO 3: Lista general con paginación
+        # Llama al servicio para obtener subcategorías de un padre específico
+        categories = category_service.get_subcategories(db=db, parent_id=parent_id, skip=skip, limit=limit)
     else:
+        # Por defecto, obtiene todas las categorías paginadas
         categories = category_service.get_all_categories(db=db, skip=skip, limit=limit)
     
+    if not categories:
+        # Opcional: devolver 404 si la consulta no devuelve resultados
+        # raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No categories found matching criteria")
+        pass # Devolver lista vacía es una respuesta válida (200 OK)
+        
     return categories
 
 # ========================================

@@ -117,7 +117,7 @@ class CategoryService:
             
         return category_crud.get_categories(db, skip=skip, limit=limit)
 
-    def get_main_categories(self, db: Session) -> List[models.Category]:
+    def get_main_categories(self, db: Session, skip: int = 0, limit: int = 100) -> List[models.Category]:
         """
         Obtiene las categorías principales (nivel raíz) para navegación.
         
@@ -127,6 +127,8 @@ class CategoryService:
         
         Args:
             db: Sesión de SQLAlchemy
+            skip: Número de registros a omitir (paginación)
+            limit: Número máximo de registros a devolver
             
         Returns:
             Lista de categorías raíz (sin parent_id)
@@ -141,9 +143,9 @@ class CategoryService:
             - Páginas de inicio con categorías destacadas
             - APIs para aplicaciones móviles que necesitan estructura jerárquica
         """
-        return category_crud.get_root_categories(db)
+        return category_crud.get_root_categories(db, skip=skip, limit=limit)
     
-    def get_subcategories(self, db: Session, parent_id: int) -> List[models.Category]:
+    def get_subcategories(self, db: Session, parent_id: int, skip: int = 0, limit: int = 100) -> List[models.Category]:
         """
         Obtiene las subcategorías de una categoría padre específica.
         
@@ -154,6 +156,8 @@ class CategoryService:
         Args:
             db: Sesión de SQLAlchemy
             parent_id: ID de la categoría padre
+            skip: Número de registros a omitir (paginación)
+            limit: Número máximo de registros a devolver
             
         Returns:
             Lista de categorías hijas directas
@@ -172,7 +176,7 @@ class CategoryService:
         # if not parent_category:
         #     raise NotFoundError(f"Parent category with id {parent_id} not found")
         
-        return category_crud.get_child_categories(db, parent_id=parent_id)
+        return category_crud.get_child_categories(db, parent_id=parent_id, skip=skip, limit=limit)
 
     # ========================================
     # OPERACIONES DE ESCRITURA CON LÓGICA DE NEGOCIO

@@ -108,7 +108,7 @@ def get_categories(db: Session, skip: int = 0, limit: int = 100) -> List[models.
     return db.query(models.Category).offset(skip).limit(limit).all()
 
 
-def get_root_categories(db: Session) -> List[models.Category]:
+def get_root_categories(db: Session, skip: int = 0, limit: int = 100) -> List[models.Category]:
     """
     Obtiene todas las categorías raíz (nivel superior de la jerarquía).
     
@@ -118,6 +118,8 @@ def get_root_categories(db: Session) -> List[models.Category]:
     
     Args:
         db: Sesión de SQLAlchemy
+        skip: Número de registros a omitir (para paginación)
+        limit: Número máximo de registros a devolver
         
     Returns:
         Lista de categorías raíz ordenadas por ID
@@ -132,10 +134,10 @@ def get_root_categories(db: Session) -> List[models.Category]:
         for cat in root_cats:
             print(f"Categoría principal: {cat.name}")
     """
-    return db.query(models.Category).filter(models.Category.parent_id.is_(None)).all()
+    return db.query(models.Category).filter(models.Category.parent_id.is_(None)).offset(skip).limit(limit).all()
 
 
-def get_child_categories(db: Session, parent_id: int) -> List[models.Category]:
+def get_child_categories(db: Session, parent_id: int, skip: int = 0, limit: int = 100) -> List[models.Category]:
     """
     Obtiene las subcategorías directas de una categoría padre.
     
@@ -146,6 +148,8 @@ def get_child_categories(db: Session, parent_id: int) -> List[models.Category]:
     Args:
         db: Sesión de SQLAlchemy
         parent_id: ID de la categoría padre
+        skip: Número de registros a omitir (para paginación)
+        limit: Número máximo de registros a devolver
         
     Returns:
         Lista de categorías hijas directas
@@ -161,7 +165,7 @@ def get_child_categories(db: Session, parent_id: int) -> List[models.Category]:
         - Implementar con múltiples queries
         - Considerar desnormalización para jerarquías muy profundas
     """
-    return db.query(models.Category).filter(models.Category.parent_id == parent_id).all()
+    return db.query(models.Category).filter(models.Category.parent_id == parent_id).offset(skip).limit(limit).all()
 
 
 # ========================================

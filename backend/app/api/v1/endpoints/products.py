@@ -38,7 +38,7 @@ from typing import List, Optional
 
 from app.api import deps  # Inyección de dependencias para sesión de BD
 from app.schemas import product as product_schema  # Esquemas Pydantic para productos
-from app.services import product_service  # Capa de servicios con lógica de negocio de productos
+from app.services.product_service import product_service  # Capa de servicios con lógica de negocio de productos
 # from app.core.exceptions import NotFoundError, DuplicateError, InvalidOperationError  # Excepciones futuras
 
 # Configuración del router para endpoints de productos
@@ -469,6 +469,31 @@ async def read_products(
         db=db, skip=skip, limit=limit, category_id=category_id, brand=brand,
         min_price=min_price, max_price=max_price, name_like=name  # name_like en el servicio
     )
+    return products
+
+@router.post("/search/semantic", response_model=List[product_schema.ProductResponse])
+async def semantic_product_search( # <--- async
+    query: product_schema.ProductSemanticSearchQuery, # Recibe el cuerpo de la petición
+    db: Session = Depends(deps.get_db)
+) -> List[product_schema.ProductResponse]:
+    """
+    Realiza una búsqueda semántica de productos basada en una consulta de texto.
+    """
+    if not query.query_text.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La consulta de búsqueda no puede estar vacía.")
+    
+    # La función de servicio ahora es async, así que la llamamos con await
+    products = await product_service.semantic_search_products( # <--- await
+        db=db, 
+        query_text=query.query_text, 
+        top_k=query.top_k
+    )
+    
+    if not products:
+        # Devolver lista vacía es aceptable (200 OK), o podrías devolver 404 si lo prefieres
+        # raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No products found matching your semantic query.")
+        return [] 
+        
     return products
 
 # ========================================

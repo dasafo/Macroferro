@@ -50,6 +50,7 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      - ./scripts:/app/scripts # Montar el directorio de scripts
     depends_on:
       - postgres
       - redis

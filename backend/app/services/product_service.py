@@ -36,6 +36,9 @@ from typing import List, Optional, Dict, Any
 from app.db import models
 from app.crud import product_crud, category_crud  # Removido image_crud hasta que se implemente
 from app.schemas import product as product_schema
+from openai import OpenAI # Asegurar importación si no está ya
+from qdrant_client import QdrantClient, models as qdrant_models # Asegurar importación
+from app.core.config import settings # Para acceder a QDRANT_URL, etc.
 # from app.schemas import image as image_schema  # Comentado hasta que se implemente image_schema
 # from app.core.exceptions import NotFoundError, InvalidOperationError
 
@@ -472,12 +475,81 @@ class ProductService:
             # raise
             raise  # Re-lanzar la excepción para manejo en capas superiores
 
+    async def semantic_search_products(
+        self, 
+        db: Session, 
+        query_text: str, 
+        top_k: int = 5
+    ) -> List[models.Product]:
+        """
+        Realiza una búsqueda semántica de productos usando Qdrant y OpenAI.
+        
+        Flujo de la operación:
+        1. Genera un embedding para el texto de consulta usando OpenAI.
+        2. Usa ese embedding para buscar los puntos más similares en Qdrant.
+        3. Extrae los SKUs del payload de los puntos encontrados.
+        4. Usa los SKUs para recuperar los detalles completos de los productos desde PostgreSQL.
+        """
+        if not settings.OPENAI_API_KEY:
+            print("Advertencia: OPENAI_API_KEY no configurada para búsqueda semántica.")
+            return []
+
+        try:
+            # 1. Conexión a clientes externos
+            # Usar cliente síncrono para operaciones puntuales en un endpoint
+            openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            
+            # Conexión a Qdrant usando gRPC para consistencia con el script de indexación
+            qdrant_client = QdrantClient(
+                host=settings.QDRANT_HOST,
+                port=settings.QDRANT_PORT_GRPC,
+                api_key=settings.QDRANT_API_KEY
+            )
+
+            # 2. Generar embedding para la consulta del usuario
+            query_embedding = openai_client.embeddings.create(
+                input=[query_text],
+                model="text-embedding-3-small" # Asegurarse de que sea el mismo modelo usado en la indexación
+            ).data[0].embedding
+
+            # 3. Realizar la búsqueda en Qdrant
+            # search_result es una lista de qdrant_client.models.ScoredPoint
+            search_result = qdrant_client.search(
+                collection_name="macroferro_products",
+                query_vector=query_embedding,
+                limit=top_k
+            )
+
+            # 4. Extraer los SKUs de los resultados de Qdrant
+            # Los SKUs se guardaron en el payload durante la indexación
+            skus_found = [point.payload.get("sku") for point in search_result if point.payload and "sku" in point.payload]
+
+            if not skus_found:
+                print("Búsqueda semántica no encontró SKUs coincidentes en Qdrant.")
+                return []
+
+            # 5. Recuperar los detalles de los productos desde PostgreSQL
+            # Utilizar los SKUs para obtener los objetos completos de los productos
+            # con todas sus relaciones cargadas (categoría, imágenes, etc.).
+            products = product_crud.get_products_by_skus(db, skus=skus_found)
+            
+            # Opcional: Preservar el orden de relevancia de Qdrant
+            product_map = {p.sku: p for p in products}
+            ordered_products = [product_map[sku] for sku in skus_found if sku in product_map]
+
+            return ordered_products
+
+        except Exception as e:
+            print(f"Error durante la búsqueda semántica: {e}")
+            # En un entorno de producción, se debería usar un logger y
+            # posiblemente devolver una excepción HTTP 503 Service Unavailable.
+            return []
+
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO
 # ========================================
 
-# Instancia única del servicio para uso en endpoints
-# Implementa patrón Singleton para eficiencia y consistencia
+# Instancia única del servicio para ser usada en toda la aplicación
 product_service = ProductService()
 
 # ========================================

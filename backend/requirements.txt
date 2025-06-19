@@ -2,8 +2,8 @@ fastapi[all]
 uvicorn[standard]
 psycopg2-binary
 redis
-qdrant-client
-openai
+qdrant-client>=1.7.0
+openai>=1.0.0
 sqlalchemy
 pydantic[email]
 pydantic-settings

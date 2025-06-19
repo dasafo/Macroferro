@@ -25,21 +25,12 @@ class Settings(BaseSettings):
     PROJECT_VERSION: str = "0.1.0"
 
     # Base de datos PostgreSQL
-    # Lee las credenciales y la información del servidor de la base de datos desde variables de entorno.
-    # Proporciona valores por defecto para un entorno de desarrollo local si no se definen.
-    POSTGRES_SERVER: str = os.getenv("POSTGRES_SERVER", "localhost") # Valor por defecto si no está en .env
-    POSTGRES_USER: str = os.getenv("POSTGRES_USER", "user")
-    POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "password")
-    POSTGRES_DB: str = os.getenv("POSTGRES_DB", "macroferro_db")
-    POSTGRES_PORT: int = int(os.getenv("POSTGRES_PORT", "5432"))
-    
-    # URL de conexión a la base de datos. Pydantic puede validarla si se proporciona.
-    DATABASE_URL: Optional[PostgresDsn] = None
+    # La URL completa se pasa desde docker-compose.yml
+    DATABASE_URL: str = os.getenv("DATABASE_URL")
 
     # Redis
-    # Configuración para la conexión con el servidor Redis, usado para caché o colas.
-    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", 6379))
+    # La URL completa se pasa desde docker-compose.yml
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")
 
     # Qdrant
     # Configuración para el motor de búsqueda de vectores Qdrant.
@@ -55,41 +46,6 @@ class Settings(BaseSettings):
     # Admin Token (para Fase 6)
     # Un token de seguridad para acceder a rutas de administración protegidas.
     ADMIN_TOKEN: str = os.getenv("ADMIN_TOKEN", "supersecretadmintoken")
-
-
-    # Ensamblar DATABASE_URL
-    # Este método es un ejemplo de cómo se podría construir la URL de la base de datos
-    # dinámicamente, aunque no está siendo utilizado como un validador de Pydantic.
-    def _assemble_db_connection(cls, v: Optional[str], values: Dict[str, Any]) -> Any:
-        if isinstance(v, str):
-            # Si v es una cadena, se devuelve como está
-            return v
-        return PostgresDsn.build(
-            scheme="postgresql",
-            user=values.get("POSTGRES_USER"),
-            password=values.get("POSTGRES_PASSWORD"),
-            host=values.get("POSTGRES_SERVER"),
-            port=str(values.get("POSTGRES_PORT")), # Pydantic espera port como string aquí
-            path=f"/{values.get('POSTGRES_DB') or ''}",
-        )
-    
-    # Usar un pre-validador para DATABASE_URL si no se proporciona directamente
-    # O simplemente definirlo como una property
-    @property
-    def ASSEMBLED_DATABASE_URL(self) -> PostgresDsn:
-        """
-        Construye dinámicamente la URL de conexión a la base de datos PostgreSQL
-        a partir de las variables de entorno individuales.
-        Esta propiedad asegura que siempre se tenga una URL de conexión válida.
-        """
-        return str(PostgresDsn.build(
-            scheme="postgresql",
-            username=self.POSTGRES_USER,
-            password=self.POSTGRES_PASSWORD,
-            host=self.POSTGRES_SERVER,
-            port=self.POSTGRES_PORT,
-            path=f"/{self.POSTGRES_DB or ''}",
-        ))
 
     class Config:
         # Configuración de Pydantic para el manejo de las settings.

@@ -145,6 +145,39 @@ def get_products(
     return query.offset(skip).limit(limit).all()
 
 
+def get_products_by_skus(db: Session, skus: List[str]) -> List[models.Product]:
+    """
+    Obtiene una lista de productos a partir de una lista de SKUs.
+
+    Esta función es muy eficiente para recuperar múltiples productos
+    cuando ya se conocen sus identificadores (por ejemplo, después de
+    una búsqueda en un sistema externo como Qdrant).
+
+    Utiliza una consulta `WHERE sku IN (...)` y precarga las relaciones
+    para evitar el problema N+1.
+
+    Args:
+        db: Sesión de SQLAlchemy
+        skus: Lista de SKUs a recuperar.
+
+    Returns:
+        Lista de objetos Product correspondientes a los SKUs encontrados.
+        La lista puede no estar en el mismo orden que la lista de entrada.
+    """
+    if not skus:
+        return []
+    
+    return (
+        db.query(models.Product)
+        .options(
+            selectinload(models.Product.category),
+            selectinload(models.Product.images_association).selectinload(models.ProductImage.image)
+        )
+        .filter(models.Product.sku.in_(skus))
+        .all()
+    )
+
+
 # ========================================
 # OPERACIONES DE ESCRITURA (CREATE, UPDATE, DELETE)
 # ========================================

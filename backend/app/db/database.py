@@ -18,15 +18,12 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings # Importamos nuestra configuración
 
-# URL de conexión a PostgreSQL construida desde las variables de entorno
-# settings.ASSEMBLED_DATABASE_URL contiene: postgresql://user:password@host:port/database
-SQLALCHEMY_DATABASE_URL = settings.ASSEMBLED_DATABASE_URL
+# URL de conexión a PostgreSQL. La obtenemos directamente desde las variables de entorno
+# a través de nuestra clase de configuración.
+SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 
 # Motor de SQLAlchemy: maneja el pool de conexiones y la comunicación con PostgreSQL
-# str() es necesario porque Pydantic v2 retorna un objeto DSN que debe convertirse a string
-engine = create_engine(
-    str(SQLALCHEMY_DATABASE_URL)
-)
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
 
 # Fábrica de sesiones de base de datos
 # Cada sesión representa una "conversación" con la base de datos

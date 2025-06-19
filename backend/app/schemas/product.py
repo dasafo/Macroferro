@@ -17,7 +17,7 @@ Los productos son el núcleo del catálogo, con relaciones complejas hacia:
 """
 
 from typing import Optional, List, Any, Dict
-from pydantic import BaseModel, HttpUrl, validator
+from pydantic import BaseModel, HttpUrl, validator, Field
 import json
 
 from .category import CategoryResponse # Importamos el schema de respuesta de categoría
@@ -219,6 +219,13 @@ class ProductResponse(ProductBase):
         return ProductResponse.from_orm(product_orm)
         """
         orm_mode = True  # Permite que Pydantic lea datos directamente desde modelos SQLAlchemy
+
+
+class ProductSemanticSearchQuery(BaseModel):
+    """Esquema para la consulta de búsqueda semántica."""
+    query_text: str
+    top_k: int = Field(default=5, ge=1, le=20, description="Número de resultados a devolver")
+
 
 # ========================================
 # NOTAS SOBRE RENDIMIENTO

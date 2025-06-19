@@ -51,11 +51,34 @@ CREATE TABLE IF NOT EXISTS products (
     price NUMERIC(10, 2) NOT NULL CHECK (price >= 0),
     brand VARCHAR(100),
     spec_json JSONB,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_category FOREIGN KEY(category_id) REFERENCES categories(category_id) ON DELETE SET NULL
 );
 COMMENT ON TABLE products IS 'Catálogo de productos ofrecidos por Macroferro.';
 COMMENT ON COLUMN products.price IS 'Precio unitario del producto. No puede ser negativo.';
 COMMENT ON COLUMN products.spec_json IS 'Especificaciones técnicas del producto en formato JSONB.';
+COMMENT ON COLUMN products.created_at IS 'Timestamp de la creación del producto.';
+COMMENT ON COLUMN products.updated_at IS 'Timestamp de la última actualización del producto.';
+
+-- Función de Trigger para actualizar `updated_at` en cada modificación
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+   NEW.updated_at = NOW(); 
+   RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+COMMENT ON FUNCTION update_updated_at_column() IS 'Función que actualiza el campo updated_at al valor actual de timestamp.';
+
+-- Trigger que se dispara en cada actualización de la tabla de productos
+CREATE TRIGGER update_products_updated_at
+BEFORE UPDATE ON products
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+COMMENT ON TRIGGER update_products_updated_at ON products IS 'Ejecuta la función de actualización de timestamp en cada UPDATE de un producto.';
 
 -- Tabla de Unión: Productos <-> Imágenes (Relación muchos-a-muchos)
 CREATE TABLE IF NOT EXISTS product_images (
@@ -118,7 +141,7 @@ COPY clients(client_id, name, email, phone, address) FROM '/docker-entrypoint-in
 COPY warehouses(warehouse_id, name, address) FROM '/docker-entrypoint-initdb.d/csv_data/warehouses.csv' WITH CSV HEADER DELIMITER ',';
 
 -- Productos depende de categories
-COPY products(sku, category_id, name, description, price, brand, spec_json) FROM '/docker-entrypoint-initdb.d/csv_data/products.csv' WITH CSV HEADER DELIMITER ',';
+COPY products(sku, category_id, name, description, price, brand, spec_json, created_at, updated_at) FROM '/docker-entrypoint-initdb.d/csv_data/products.csv' WITH CSV HEADER DELIMITER ',';
 
 -- Carga de imágenes
 -- Paso 1: Cargar el CSV de imágenes en una tabla temporal
