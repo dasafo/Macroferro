@@ -1,9 +1,12 @@
-fastapi
+fastapi[all]
 uvicorn[standard]
 psycopg2-binary
 redis
 qdrant-client
 openai
 sqlalchemy
-pydantic
+pydantic[email]
+pydantic-settings
 python-dotenv
+passlib[bcrypt]
+python-multipart
