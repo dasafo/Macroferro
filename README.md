@@ -16,10 +16,10 @@ La arquitectura se basa en un enfoque moderno de servicios contenerizados para g
 -   **Backend API:** FastAPI (Python 3.9)
 -   **ORM:** SQLAlchemy 2.0 con modelos declarativos
 -   **Validación:** Pydantic v2 para esquemas y validación de datos
--   **Orquestación/Workflow:** n8n (para el bot - fase futura)
+-   **Orquestación/Workflow:** n8n (Entorno de desarrollo configurado)
 -   **Interacción con Usuario:** Bot de Telegram (fase futura)
 -   **IA (Embeddings & Consultas):** OpenAI API
--   **Exposición Local (Desarrollo):** ngrok (fase futura)
+-   **Exposición Local (Desarrollo):** ngrok (Integrado para webhooks de n8n)
 
 ---
 
@@ -188,7 +188,8 @@ Se ha desarrollado un script robusto para la indexación de productos en la base
 - [🚧] **Búsqueda semántica** (Qdrant + OpenAI)
   - **Completado:** Lógica de indexación, enriquecimiento y vectorización.
   - **Pendiente:** Endpoint en la API para realizar las búsquedas.
-- [ ] **Bot de Telegram** (interfaz conversacional)
+- [🚧] **Orquestación de Workflows (n8n):** Entorno base configurado y securizado, listo para el desarrollo de flujos.
+- [ ] **Bot de Telegram** (interfaz conversacional - dependerá de n8n)
 - [ ] **Dashboard administrativo** (gestión web)
 
 ---
@@ -210,35 +211,11 @@ Se ha desarrollado un script robusto para la indexación de productos en la base
 
 2. **Configurar Variables de Entorno:**
    
-   Crear archivo `.env` en la raíz del proyecto:
-   ```env
-   # Configuración de PostgreSQL
-   POSTGRES_USER=user
-   POSTGRES_PASSWORD=password
-   POSTGRES_DB=macroferro_db
-   POSTGRES_HOST=macroferro_postgres
-   POSTGRES_PORT=5432
-
-   # Configuración de PgAdmin
-   PGADMIN_EMAIL=admin@example.com
-   PGADMIN_PASSWORD=admin
-
-   # Configuración de FastAPI
-   SECRET_KEY=tu_clave_secreta_super_segura_aqui
-   ALGORITHM=HS256
-   ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-   # APIs externas (para fases futuras)
-   OPENAI_API_KEY=tu_clave_de_openai_aqui
-   TELEGRAM_BOT_TOKEN=tu_token_de_telegram_aqui
-
-   # Configuración de Redis
-   REDIS_URL=redis://macroferro_redis:6379
-
-   # Configuración de Qdrant
-   QDRANT_HOST=macroferro_qdrant
-   QDRANT_PORT=6333
+   Copia el archivo de ejemplo `.env.example` y renómbralo a `.env`.
+   ```bash
+   cp .env.example .env
    ```
+   Abre el nuevo archivo `.env` y rellena las variables necesarias, como `OPENAI_API_KEY` y la `N8N_ENCRYPTION_KEY`. La configuración por defecto está lista para funcionar en local.
 
 3. **Levantar los Servicios:**
    ```bash
@@ -276,6 +253,31 @@ curl http://localhost:8000/api/v1/products/SKU001
 # Listar categorías
 curl http://localhost:8000/api/v1/categories/
 ```
+
+### Uso de n8n con Ngrok para Desarrollo de Webhooks
+
+Para probar flujos de trabajo en `n8n` que dependen de webhooks de servicios externos (como Stripe, GitHub, etc.), necesitas exponer tu instancia local a internet. Hemos configurado el proyecto para que esto sea muy sencillo con `ngrok`.
+
+1.  **Levanta todos los servicios** (si no lo has hecho ya):
+    ```bash
+    make up
+    ```
+
+2.  **Inicia ngrok:** En una **terminal separada**, ejecuta el siguiente comando para crear un túnel seguro hacia el puerto de n8n:
+    ```bash
+    ngrok http 5678
+    ```
+
+3.  **Configura la URL del Webhook:** `ngrok` te dará una URL pública (`Forwarding`) que empieza por `https://`. Cópiala.
+    - Abre tu archivo `.env`.
+    - Pega la URL en la variable `WEBHOOK_URL`.
+
+4.  **Reinicia n8n:** Aplica los cambios reiniciando el contenedor de `n8n` para que utilice la nueva URL pública.
+    ```bash
+    docker compose restart n8n
+    ```
+
+¡Listo! Ahora puedes acceder a tu instancia de n8n a través de la URL de ngrok. Cuando crees un webhook en n8n, usará automáticamente esta dirección pública, permitiéndote recibir datos de servicios externos en tu entorno de desarrollo local.
 
 ### Gestión del Entorno
 
