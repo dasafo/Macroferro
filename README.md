@@ -404,3 +404,13 @@ Para preguntas técnicas o contribuciones, revisar la documentación en `/docs` 
 
 **Estado del proyecto:** 🟢 **Activo - Fase 1 Completada**
 
+## 👤 Author and Contact
+
+**David Salas**
+- Website: [dasafodata.com](https://dasafodata.com)
+- GitHub: [@dasafo](https://github.com/dasafo)
+- LinkedIn: [David Salas](https://www.linkedin.com/in/dasafodata/)
+
+<p align="center">
+  <sub>Created with ❤️ by David Salas - dasafodata</sub>
+</p>
