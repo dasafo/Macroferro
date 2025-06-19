@@ -239,4 +239,12 @@ update-catalog: ## 🔄 Actualizar el catálogo de productos con IA (descripcion
 	@echo "$(YELLOW)🤖 Actualizando catálogo de productos con IA...$(NC)"
 	@echo "$(BLUE)🔍 Ejecutando script de indexación...$(NC)"
 	docker exec $(BACKEND_CONTAINER) python scripts/index_qdrant_data.py
-	@echo "$(GREEN)✅ Catálogo actualizado correctamente$(NC)" 
+	@echo "$(GREEN)✅ Catálogo actualizado correctamente$(NC)"
+
+search-test: ## 🧪 Probar la búsqueda semántica con una consulta
+	@echo "$(YELLOW)🧪 Probando búsqueda semántica...$(NC)"
+	@if [ -z "$(query)" ]; then \
+		echo "$(RED)❌ Error: Debes proporcionar una consulta. Uso: make search-test query=\"tu búsqueda\"$(NC)"; \
+		exit 1; \
+	fi
+	docker exec $(BACKEND_CONTAINER) python scripts/test_semantic_search.py "$(query)" 

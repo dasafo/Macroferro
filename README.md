@@ -162,6 +162,8 @@ Se ha desarrollado un script robusto para la indexación de productos en la base
   - **Indexación en Qdrant:** Almacena los productos como puntos vectoriales en la colección `macroferro_products`.
   - **Gestión de Estado:** Solo procesa productos nuevos o modificados desde la última ejecución.
 - ✅ **Comando `Makefile` (`make update-catalog`):** Permite ejecutar todo el proceso de indexación con una sola instrucción.
+- ✅ **Script de Prueba (`scripts/test_semantic_search.py`):** Permite realizar búsquedas semánticas directas para validar la calidad de los resultados.
+- ✅ **Comandos `Makefile` (`make update-catalog`, `make search-test`):** Simplifican la ejecución de la indexación y las pruebas de búsqueda.
 
 ---
 
@@ -310,6 +312,9 @@ make logs-backend
 
 # Actualizar el catálogo de productos con IA
 make update-catalog
+
+# Probar la búsqueda semántica con una consulta
+make search-test query="tu búsqueda aquí"
 ```
 
 ---
