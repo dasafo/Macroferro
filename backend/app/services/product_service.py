@@ -32,12 +32,13 @@ Patrones implementados:
 
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
+import asyncio
 
 from app.db import models
 from app.crud import product_crud, category_crud  # Removido image_crud hasta que se implemente
 from app.schemas import product as product_schema
-from openai import OpenAI # Asegurar importación si no está ya
-from qdrant_client import QdrantClient, models as qdrant_models # Asegurar importación
+from openai import AsyncOpenAI # Usar cliente asíncrono
+from qdrant_client import AsyncQdrantClient, models as qdrant_models # Usar cliente asíncrono
 from app.core.config import settings # Para acceder a QDRANT_URL, etc.
 # from app.schemas import image as image_schema  # Comentado hasta que se implemente image_schema
 # from app.core.exceptions import NotFoundError, InvalidOperationError
@@ -475,75 +476,84 @@ class ProductService:
             # raise
             raise  # Re-lanzar la excepción para manejo en capas superiores
 
-    async def semantic_search_products(
-        self, 
-        db: Session, 
-        query_text: str, 
-        top_k: int = 5
-    ) -> List[models.Product]:
+    async def search_products(
+        self,
+        db: Session,
+        query_text: str,
+        top_k: int = 10
+    ) -> Dict[str, List[models.Product]]:
         """
-        Realiza una búsqueda semántica de productos usando Qdrant y OpenAI.
+        Realiza una búsqueda de productos usando Qdrant y OpenAI de forma asíncrona.
         
         Flujo de la operación:
-        1. Genera un embedding para el texto de consulta usando OpenAI.
-        2. Usa ese embedding para buscar los puntos más similares en Qdrant.
+        1. Genera un embedding para el texto de consulta usando OpenAI (async).
+        2. Usa ese embedding para buscar los puntos más similares en Qdrant (async).
         3. Extrae los SKUs del payload de los puntos encontrados.
-        4. Usa los SKUs para recuperar los detalles completos de los productos desde PostgreSQL.
+        4. Usa los SKUs para recuperar los detalles completos desde PostgreSQL (sync in thread).
+        5. Divide los resultados en principales y relacionados.
         """
         if not settings.OPENAI_API_KEY:
-            print("Advertencia: OPENAI_API_KEY no configurada para búsqueda semántica.")
-            return []
+            print("Advertencia: OPENAI_API_KEY no configurada para búsqueda.")
+            return {"main_results": [], "related_results": []}
 
+        qdrant_client = None  # Definir fuera del try para asegurar el cierre en finally
         try:
-            # 1. Conexión a clientes externos
-            # Usar cliente síncrono para operaciones puntuales en un endpoint
-            openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            # 1. Conexión a clientes externos (versiones asíncronas)
+            openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
             
-            # Conexión a Qdrant usando gRPC para consistencia con el script de indexación
-            qdrant_client = QdrantClient(
+            qdrant_client = AsyncQdrantClient(
                 host=settings.QDRANT_HOST,
                 port=settings.QDRANT_PORT_GRPC,
-                api_key=settings.QDRANT_API_KEY
+                api_key=settings.QDRANT_API_KEY,
+                timeout=20.0 # Timeout generoso para la primera conexión
             )
 
-            # 2. Generar embedding para la consulta del usuario
-            query_embedding = openai_client.embeddings.create(
+            # 2. Generar embedding para la consulta del usuario (await)
+            embedding_response = await openai_client.embeddings.create(
                 input=[query_text],
-                model="text-embedding-3-small" # Asegurarse de que sea el mismo modelo usado en la indexación
-            ).data[0].embedding
+                model="text-embedding-3-small"
+            )
+            query_embedding = embedding_response.data[0].embedding
 
-            # 3. Realizar la búsqueda en Qdrant
-            # search_result es una lista de qdrant_client.models.ScoredPoint
-            search_result = qdrant_client.search(
+            # 3. Realizar la búsqueda en Qdrant (await)
+            search_result = await qdrant_client.search(
                 collection_name="macroferro_products",
                 query_vector=query_embedding,
                 limit=top_k
             )
 
-            # 4. Extraer los SKUs de los resultados de Qdrant
-            # Los SKUs se guardaron en el payload durante la indexación
+            # 4. Extraer los SKUs de los resultados
             skus_found = [point.payload.get("sku") for point in search_result if point.payload and "sku" in point.payload]
 
             if not skus_found:
-                print("Búsqueda semántica no encontró SKUs coincidentes en Qdrant.")
-                return []
+                print("Búsqueda no encontró SKUs coincidentes en Qdrant.")
+                return {"main_results": [], "related_results": []}
 
-            # 5. Recuperar los detalles de los productos desde PostgreSQL
-            # Utilizar los SKUs para obtener los objetos completos de los productos
-            # con todas sus relaciones cargadas (categoría, imágenes, etc.).
-            products = product_crud.get_products_by_skus(db, skus=skus_found)
+            # 5. Recuperar detalles desde PostgreSQL (operación síncrona en un hilo)
+            # Esto evita bloquear el event loop de asyncio
+            products = await asyncio.to_thread(
+                product_crud.get_products_by_skus, db, skus=skus_found
+            )
             
             # Opcional: Preservar el orden de relevancia de Qdrant
             product_map = {p.sku: p for p in products}
             ordered_products = [product_map[sku] for sku in skus_found if sku in product_map]
 
-            return ordered_products
+            # Dividir en resultados principales y relacionados
+            main_results_count = 3
+            main_results = ordered_products[:main_results_count]
+            related_results = ordered_products[main_results_count:main_results_count + 2] # Limitar a 2 relacionados
+
+            return {"main_results": main_results, "related_results": related_results}
 
         except Exception as e:
-            print(f"Error durante la búsqueda semántica: {e}")
-            # En un entorno de producción, se debería usar un logger y
-            # posiblemente devolver una excepción HTTP 503 Service Unavailable.
-            return []
+            print(f"Error durante la búsqueda: {e}")
+            # En producción: usar logger y devolver excepción HTTP adecuada.
+            return {"main_results": [], "related_results": []}
+        finally:
+            # Asegurar que el cliente de Qdrant se cierre siempre
+            if qdrant_client:
+                await qdrant_client.close()
 
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO

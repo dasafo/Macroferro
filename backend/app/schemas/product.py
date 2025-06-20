@@ -221,10 +221,41 @@ class ProductResponse(ProductBase):
         orm_mode = True  # Permite que Pydantic lea datos directamente desde modelos SQLAlchemy
 
 
-class ProductSemanticSearchQuery(BaseModel):
-    """Esquema para la consulta de búsqueda semántica."""
-    query_text: str
-    top_k: int = Field(default=5, ge=1, le=20, description="Número de resultados a devolver")
+class ProductSearchQuery(BaseModel):
+    """
+    Esquema para una consulta de búsqueda de productos por texto.
+    """
+    query_text: str = Field(..., min_length=3, description="Texto de búsqueda para encontrar productos.")
+    top_k: int = Field(default=10, ge=1, le=50, description="Número de resultados a devolver.")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query_text": "Taladro",
+                "top_k": 10
+            }
+        }
+
+
+class ProductSearchResponse(BaseModel):
+    """
+    Esquema de respuesta para la búsqueda de productos, separando
+    los resultados principales de los relacionados.
+    """
+    main_results: List[ProductResponse] = Field(..., description="Los resultados más relevantes para la búsqueda.")
+    related_results: List[ProductResponse] = Field(..., description="Resultados secundarios o sugerencias adicionales.")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "main_results": [
+                    # ... ejemplo de ProductResponse ...
+                ],
+                "related_results": [
+                    # ... ejemplo de ProductResponse ...
+                ]
+            }
+        }
 
 
 # ========================================

@@ -471,30 +471,33 @@ async def read_products(
     )
     return products
 
-@router.post("/search/semantic", response_model=List[product_schema.ProductResponse])
-async def semantic_product_search( # <--- async
-    query: product_schema.ProductSemanticSearchQuery, # Recibe el cuerpo de la petición
+@router.post("/search", response_model=product_schema.ProductSearchResponse)
+async def search_products(
+    query: product_schema.ProductSearchQuery,
     db: Session = Depends(deps.get_db)
-) -> List[product_schema.ProductResponse]:
+) -> product_schema.ProductSearchResponse:
     """
-    Realiza una búsqueda semántica de productos basada en una consulta de texto.
+    Realiza una búsqueda de productos basada en una consulta de texto.
+    
+    Devuelve los resultados separados en:
+    - `main_results`: Los 3 productos más relevantes.
+    - `related_results`: Los siguientes 2 productos como sugerencias.
     """
     if not query.query_text.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La consulta de búsqueda no puede estar vacía.")
-    
-    # La función de servicio ahora es async, así que la llamamos con await
-    products = await product_service.semantic_search_products( # <--- await
-        db=db, 
-        query_text=query.query_text, 
-        top_k=query.top_k
+
+    # El servicio ahora devuelve un diccionario con 'main_results' y 'related_results'
+    search_results = await product_service.search_products(
+        db=db,
+        query_text=query.query_text,
+        top_k=query.top_k # El servicio internamente tomará los que necesite
     )
-    
-    if not products:
-        # Devolver lista vacía es aceptable (200 OK), o podrías devolver 404 si lo prefieres
-        # raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No products found matching your semantic query.")
-        return [] 
-        
-    return products
+
+    if not search_results["main_results"] and not search_results["related_results"]:
+        # Devolver una respuesta vacía pero bien formada si no hay resultados
+        return product_schema.ProductSearchResponse(main_results=[], related_results=[])
+
+    return search_results
 
 # ========================================
 # CONFIGURACIÓN Y METADATOS

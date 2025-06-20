@@ -63,6 +63,10 @@ services:
       QDRANT_PORT_GRPC: 6333
       QDRANT_PORT_REST: 6334
       OPENAI_API_KEY: ${OPENAI_API_KEY} # Debe estar en un .env o ser exportada
+      # Telegram Bot variables
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET}
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
   n8n:

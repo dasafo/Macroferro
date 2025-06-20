@@ -233,7 +233,73 @@
     *   Crear el flujo básico en n8n para búsqueda y visualización de productos.
     *   Implementar lógica de recomendaciones.
 
----
+¡Pillo la idea perfectamente! Es un plan fantástico y muy ambicioso, la evolución natural y más potente de todo lo que hemos construido. Pasar de una API a un asistente de ventas conversacional es el objetivo final.
+
+Me encanta la visión. Para que no nos perdamos y construyamos sobre cimientos sólidos, he preparado una **hoja de ruta detallada**, dividida en fases lógicas. Iremos implementando paso a paso.
+
+Esta es la estrategia que te propongo (Cursor):
+
+### **Hoja de Ruta: Del Chat a la Venta**
+
+#### 📍 **FASE 1: El Cerebro de la Búsqueda (El Endpoint que Falta)**
+
+Antes de que `n8n` pueda hacer algo, necesita una "puerta de entrada" inteligente en nuestra API. Actualmente, no tenemos un endpoint que acepte una frase en lenguaje natural y devuelva resultados semánticos. **Este es el primer paso y el más crítico.**
+
+-   **Tarea 1.1: Crear el Endpoint.**
+    -   Definir una nueva ruta en `backend/app/v1/endpoints/products.py`: `POST /api/v1/products/search`.
+    -   ¿Por qué `POST`? Porque las consultas de búsqueda pueden ser largas y es más limpio enviarlas en el cuerpo de la petición.
+    -   Aceptará un JSON con un campo: `{"query": "lo que el usuario escribió"}`.
+
+-   **Tarea 1.2: Implementar la Lógica en el Servicio.**
+    -   En `backend/app/services/product_service.py`, crearemos la función `semantic_product_search`.
+    -   Esta función tomará el texto del usuario, usará el modelo de OpenAI (`text-embedding-3-small`) para convertirlo en un vector.
+    -   Consultará Qdrant con ese vector para obtener los `sku` de los productos más relevantes.
+
+-   **Tarea 1.3: Enriquecer los Resultados.**
+    -   Con los `sku` devueltos por Qdrant, la función consultará nuestra base de datos PostgreSQL para obtener los detalles completos de cada producto (nombre, precio, imagen, etc.).
+
+-   **Tarea 1.4: Devolver Resultados Principales y Relacionados.**
+    -   El endpoint no solo devolverá una lista. Devolverá un objeto con dos claves:
+        -   `main_results`: Los 3-4 productos más relevantes.
+        -   `related_results`: Los siguientes 2-3, como sugerencias.
+
+#### 🚀 **FASE 2: El Flujo Básico de Conversación en n8n**
+
+Una vez que la API sea capaz de "pensar", construiremos el esqueleto del flujo en `n8n`.
+
+-   **Tarea 2.1: El Disparador (Trigger).**
+    -   Usar el nodo `Telegram Trigger` para que el flujo se inicie cada vez que un usuario envía un mensaje.
+
+-   **Tarea 2.2: La Inteligencia (LLM).**
+    -   Conectar un nodo `OpenAI` (o `HTTP Request` a la API de OpenAI).
+    -   Le enviaremos el mensaje del usuario con un prompt simple: *"Analiza esta frase de un cliente: '{mensaje_usuario}'. ¿Está buscando un producto? Si es así, extrae el objeto que busca. Responde solo en formato JSON con la estructura `{'intent': 'search', 'query': 'objeto'}` o `{'intent': 'other'}`."*
+
+-   **Tarea 2.3: El "Switch" Lógico.**
+    -   Usar un nodo `Switch` que evalúe el `intent` devuelto por el LLM.
+    -   **Camino 1 (`search`):** Continúa el flujo de búsqueda.
+    -   **Camino 2 (`other`):** Por ahora, responde con un "No te he entendido, prueba a buscar un producto como 'martillos' o 'tornillos de acero'".
+
+-   **Tarea 2.4: La Llamada a la API.**
+    -   En el camino `search`, usar un nodo `HTTP Request` para llamar a nuestro nuevo endpoint `POST /api/v1/products/search` con el `query` extraído por el LLM.
+
+-   **Tarea 2.5: La Respuesta Simple.**
+    -   Usar un nodo `Telegram` para enviar los resultados. Al principio, será una lista de texto simple formateada con los nombres y precios de los productos.
+
+#### ✨ **FASE 3: Mejorando la Experiencia de Usuario (Hacerlo Bonito)**
+
+Con el flujo funcionando, lo puliremos para que sea más visual e interactivo.
+
+-   **Tarea 3.1: Respuestas Enriquecidas.**
+    -   En lugar de una lista de texto, iterar sobre los resultados y enviar cada producto como un mensaje separado que incluya su **imagen**, nombre, precio y una breve descripción.
+
+-   **Tarea 3.2: Botones Interactivos.**
+    -   Añadir a cada mensaje de producto un **botón de "Añadir al carrito"** usando los `Inline Keyboards` de Telegram. Aunque todavía no funcione, prepara la interfaz para la siguiente fase.
+
+-   **Tarea 3.3: Manejo de "No Hay Resultados".**
+    -   Mejorar el mensaje cuando la búsqueda no devuelve nada, sugiriendo alternativas o pidiendo al usuario que reformule su búsqueda.
+
+
+
 
 ### Fase 4: Lógica Transaccional – Carrito y Pedidos
 

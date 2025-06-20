@@ -69,11 +69,11 @@ async def perform_search(query_text: str, top_k: int = 5):
 
         # 2. Buscar en Qdrant
         logging.info(f"🔍 Buscando los {top_k} productos más relevantes en Qdrant...")
-        search_result = await qdrant_client.search(
+        search_result = await qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
-            query_vector=query_vector,
+            query=query_vector,
             limit=top_k,
-            with_payload=True  # Para obtener los datos del producto
+            with_payload=True,  # Para obtener los datos del producto
         )
         logging.info("✅ Búsqueda completada.")
 

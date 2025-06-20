@@ -1,6 +1,6 @@
 # backend/app/core/config.py
 
-from pydantic import PostgresDsn, AnyHttpUrl
+from pydantic import PostgresDsn, AnyHttpUrl, Field
 from pydantic_settings import BaseSettings
 from typing import Optional, Dict, Any
 import os
@@ -47,12 +47,20 @@ class Settings(BaseSettings):
     # Un token de seguridad para acceder a rutas de administración protegidas.
     ADMIN_TOKEN: str = os.getenv("ADMIN_TOKEN", "supersecretadmintoken")
 
-    class Config:
-        # Configuración de Pydantic para el manejo de las settings.
-        case_sensitive = True
-        # Si vas a usar un archivo .env específicamente para la app (no el de docker-compose)
-        # env_file = ".env_app" 
-        # env_file_encoding = 'utf-8'
+    # Logging
+    log_level: str = "INFO"
+    log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    
+    # Telegram Bot
+    telegram_bot_token: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN")
+    telegram_webhook_url: Optional[str] = os.getenv("TELEGRAM_WEBHOOK_URL", "")
+    telegram_webhook_secret: Optional[str] = os.getenv("TELEGRAM_WEBHOOK_SECRET")
+
+    model_config = {
+        "env_file": ".env", 
+        "extra": "ignore",
+        "case_sensitive": False
+    }
 
 # Se crea una instancia global de la configuración para ser importada en otras partes de la aplicación.
 settings = Settings()

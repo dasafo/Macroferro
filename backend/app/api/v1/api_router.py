@@ -36,7 +36,7 @@ Estructura de URLs resultante:
 from fastapi import APIRouter
 
 # Importación de routers especializados por dominio de negocio
-from app.api.v1.endpoints import products, categories  # Routers de endpoints específicos
+from app.api.v1.endpoints import products, categories, telegram  # Routers de endpoints específicos
 
 # ========================================
 # CONFIGURACIÓN DEL ROUTER PRINCIPAL V1
@@ -64,6 +64,14 @@ api_router_v1.include_router(
     products.router,                # Router con endpoints de productos
     prefix="/products",             # Prefijo: /api/v1/products
     tags=["Products"]               # Tag para documentación OpenAPI/Swagger
+)
+
+# ROUTER DE TELEGRAM BOT
+# Maneja webhook y operaciones del bot de Telegram
+api_router_v1.include_router(
+    telegram.router,                # Router con endpoints de Telegram
+    prefix="/telegram",             # Prefijo: /api/v1/telegram
+    tags=["Telegram Bot"]           # Tag para documentación OpenAPI/Swagger
 )
 
 # ========================================
