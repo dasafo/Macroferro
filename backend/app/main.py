@@ -108,38 +108,38 @@ async def read_root():
 
 # EVENTO DE STARTUP - Ejecutado al iniciar la aplicación
 # Aquí se pueden inicializar recursos, conexiones, servicios externos, etc.
-# @app.on_event("startup")
-# async def startup_event():
-#     """
-#     Evento ejecutado al iniciar la aplicación.
-#     
-#     Aquí se pueden realizar tareas de inicialización como:
-#     - Verificación de conexión a la base de datos
-#     - Inicialización de pools de conexiones
-#     - Configuración de servicios externos
-#     - Carga de datos iniciales o cache
-#     - Verificación de permisos y directorios
-#     - Inicialización de sistemas de logging
-#     
-#     Ejemplos de inicialización:
-#     - Conectar a Redis para cache
-#     - Verificar conectividad con servicios externos
-#     - Precarga de datos de configuración
-#     - Inicialización de métricas y monitoreo
-#     """
-#     # Ejemplo: Verificar conexión a la BD
-#     # from app.database import verify_database_connection
-#     # await verify_database_connection()
-#     
-#     # Ejemplo: Inicializar cache Redis
-#     # from app.core.cache import initialize_redis
-#     # await initialize_redis()
-#     
-#     # Ejemplo: Cargar configuración inicial
-#     # from app.core.initial_data import load_initial_categories
-#     # await load_initial_categories()
-#     
-#     pass
+@app.on_event("startup")
+async def startup_event():
+    """
+    Evento ejecutado al iniciar la aplicación.
+    
+    Inicializa automáticamente el webhook de Telegram con la URL configurada
+    en las variables de entorno para evitar configuración manual.
+    
+    Tareas de inicialización:
+    - Configuración automática del webhook de Telegram
+    - Verificación de conexión con la API de Telegram
+    - Validación de la URL del webhook configurada
+    """
+    try:
+        # Configurar automáticamente el webhook de Telegram
+        from app.services.telegram_service import TelegramBotService
+        
+        # Solo configurar webhook si está definida la URL en las variables de entorno
+        if settings.telegram_webhook_url:
+            telegram_service = TelegramBotService()
+            webhook_result = await telegram_service.set_webhook(settings.telegram_webhook_url)
+            
+            if webhook_result.get("success", False):
+                print(f"✅ Webhook de Telegram configurado: {settings.telegram_webhook_url}")
+            else:
+                print(f"⚠️  Error al configurar webhook: {webhook_result}")
+        else:
+            print("ℹ️  TELEGRAM_WEBHOOK_URL no configurada, webhook no establecido")
+            
+    except Exception as e:
+        print(f"❌ Error durante la inicialización del webhook: {e}")
+        # No detener la aplicación si falla la configuración del webhook
 
 # EVENTO DE SHUTDOWN - Ejecutado al cerrar la aplicación
 # Aquí se pueden limpiar recursos, cerrar conexiones, guardar estados, etc.

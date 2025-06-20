@@ -218,14 +218,46 @@ cp .env.example .env
 Edita el archivo `.env` con tus credenciales:
 - **OpenAI API Key** para funcionalidades de IA
 - **Telegram Bot Token** para el bot
+- **TELEGRAM_WEBHOOK_URL** con tu dominio estático (ej: `http://bot.tudominio.com:8000/api/v1/telegram/webhook`)
 - **PostgreSQL** y **Qdrant** (ya configurados)
 
-### **3. Inicio de servicios**
+### **3. Configuración del Bot de Telegram (Opción Estática - Recomendada)**
+
+**Opción A: Dominio Estático (Recomendada para producción)**
+1. **Configura un subdominio** que apunte a tu servidor:
+   ```bash
+   # En tu panel de hosting (cPanel, Cloudflare, etc.)
+   # Crear registro A: bot.tudominio.com -> IP_DE_TU_SERVIDOR
+   ```
+
+2. **Actualiza el .env** con tu dominio:
+   ```bash
+   TELEGRAM_WEBHOOK_URL=http://bot.tudominio.com:8000/api/v1/telegram/webhook
+   ```
+
+3. **El webhook se configura automáticamente** al iniciar la aplicación.
+
+**Opción B: ngrok (Para desarrollo/pruebas)**
+1. **Instala ngrok** y ejecuta:
+   ```bash
+   ./scripts/setup_webhook.sh
+   ```
+
+### **4. Verificación del webhook**
+```bash
+# Probar si el dominio está listo
+./scripts/test_webhook_ready.sh
+
+# Ver logs del webhook
+docker logs macroferro_backend
+```
+
+### **5. Inicio de servicios**
 ```bash
 make up
 ```
 
-### **4. Acceso a servicios**
+### **6. Acceso a servicios**
 - **API Backend:** http://localhost:8000
 - **PgAdmin:** http://localhost:5433
 - **Qdrant:** http://localhost:6333
