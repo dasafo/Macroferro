@@ -1,27 +1,36 @@
-# Macroferro
+# 🏭 Macroferro - Sistema Mayorista B2B
 
-## Visión General del Proyecto
-
-Macroferro es un sistema de gestión y ventas mayorista B2B diseñado para una ferretería. El objetivo es crear una plataforma robusta que permita a los clientes (otras ferreterías) consultar productos y realizar pedidos a través de una interfaz conversacional (un bot de Telegram). A su vez, el sistema proporcionará al dueño herramientas para gestionar el inventario, los productos y los pedidos.
-
-La arquitectura se basa en un enfoque moderno de servicios contenerizados para garantizar la escalabilidad y la mantenibilidad.
-
-## Pila Tecnológica
-
--   **Contenerización:** Docker, Docker Compose
--   **Base de Datos Relacional:** PostgreSQL 16
--   **Gestión de BD:** PgAdmin 4
--   **Base de Datos Vectorial:** Qdrant (para búsqueda semántica)
--   **Caché en Memoria:** Redis (para sesiones y caché)
--   **Backend API:** FastAPI (Python 3.9)
--   **ORM:** SQLAlchemy 2.0 con modelos declarativos
--   **Validación:** Pydantic v2 para esquemas y validación de datos
--   **Orquestación/Workflow:** n8n (Entorno de desarrollo configurado)
--   **Interacción con Usuario:** Bot de Telegram (fase futura)
--   **IA (Embeddings & Consultas):** OpenAI API
--   **Exposición Local (Desarrollo):** ngrok (Integrado para webhooks de n8n)
+**Plataforma completa de gestión mayorista para ferreterías con inteligencia artificial integrada.**
 
 ---
+
+## 📖 Descripción del Proyecto
+
+**Macroferro** es un sistema mayorista B2B diseñado para ferreterías que permite:
+- **Consulta inteligente de productos** vía bot de Telegram con IA
+- **Búsqueda semántica avanzada** utilizando embeddings vectoriales
+- **Gestión completa de inventario** con múltiples almacenes
+- **Procesamiento de pedidos** automatizado
+- **Análisis de datos** y reportes detallados
+
+## 🛠️ Stack Tecnológico
+
+-   **Contenerización:** Docker & Docker Compose
+-   **Base de Datos:** PostgreSQL + PgAdmin
+-   **Búsqueda Vectorial:** Qdrant (embeddings)
+-   **Caché:** Redis (sesiones, carritos)
+-   **API Backend:** FastAPI (Python)
+-   **Interacción:** Bot de Telegram con IA
+-   **Inteligencia Artificial:** OpenAI API
+-   **Exposición Local:** ngrok (para webhooks de Telegram)
+
+## 🎯 Características Principales
+
+-   **🤖 Bot de Telegram Inteligente:** Interfaz conversacional para búsqueda y pedidos
+-   **🔍 Búsqueda Semántica:** Encuentra productos usando lenguaje natural
+-   **📦 Gestión de Inventario:** Control de stock en tiempo real
+-   **🚀 API REST Completa:** Documentación automática con FastAPI
+-   **🔐 Seguridad Robusta:** Autenticación y autorización integradas
 
 ## Estado Actual del Proyecto: **FASE 1 COMPLETADA**
 
@@ -188,166 +197,49 @@ Se ha desarrollado un script robusto para la indexación de productos en la base
 - [🚧] **Búsqueda semántica** (Qdrant + OpenAI)
   - **Completado:** Lógica de indexación, enriquecimiento y vectorización.
   - **Pendiente:** Endpoint en la API para realizar las búsquedas.
-- [🚧] **Orquestación de Workflows (n8n):** Entorno base configurado y securizado, listo para el desarrollo de flujos.
-- [ ] **Bot de Telegram** (interfaz conversacional - dependerá de n8n)
+- [✅] **Bot de Telegram** (interfaz conversacional completamente integrada)
 - [ ] **Dashboard administrativo** (gestión web)
 
 ---
 
-## Instrucciones de Puesta en Marcha
+## 🚀 **Configuración inicial**
 
-### Prerrequisitos
-- Docker Engine 20.10+
-- Docker Compose v2.0+
-- Git (para clonar el repositorio)
-
-### Instalación
-
-1. **Clonar el Repositorio:**
-   ```bash
-   git clone <url-del-repositorio>
-   cd Macroferro
-   ```
-
-2. **Configurar Variables de Entorno:**
-   
-   Copia el archivo de ejemplo `.env.example` y renómbralo a `.env`.
-   ```bash
-   cp .env.example .env
-   ```
-   Abre el nuevo archivo `.env` y rellena las variables necesarias, como `OPENAI_API_KEY` y la `N8N_ENCRYPTION_KEY`. La configuración por defecto está lista para funcionar en local.
-
-3. **Levantar los Servicios:**
-   ```bash
-   docker compose up -d --build
-   ```
-
-4. **Verificar el Estado:**
-   ```bash
-   docker compose ps
-   ```
-
-### Acceso a los Servicios
-
-Una vez levantados los servicios, están disponibles en:
-
-- **🚀 API Backend (FastAPI):** http://localhost:8000
-- **📖 Documentación API:** http://localhost:8000/docs
-- **🐘 PgAdmin:** http://localhost:5050
-- **🔍 Qdrant:** http://localhost:6333
-- **⚡ Redis:** localhost:6379
-
-### Verificación de la API
-
-**Probar endpoints básicos:**
+### **1. Clona el repositorio**
 ```bash
-# Endpoint raíz (health check)
-curl http://localhost:8000/
-
-# Listar productos
-curl http://localhost:8000/api/v1/products/
-
-# Obtener producto específico
-curl http://localhost:8000/api/v1/products/SKU001
-
-# Listar categorías
-curl http://localhost:8000/api/v1/categories/
+git clone https://github.com/tu-usuario/macroferro
+cd macroferro
 ```
 
-### Uso de n8n con Ngrok para Desarrollo de Webhooks
-
-Para probar flujos de trabajo en `n8n` que dependen de webhooks de servicios externos (como Stripe, GitHub, etc.), necesitas exponer tu instancia local a internet. Hemos configurado el proyecto para que esto sea muy sencillo con `ngrok`.
-
-1.  **Levanta todos los servicios** (si no lo has hecho ya):
-    ```bash
-    make up
-    ```
-
-2.  **Inicia ngrok:** En una **terminal separada**, ejecuta el siguiente comando para crear un túnel seguro hacia el puerto de n8n:
-    ```bash
-    ngrok http 5678
-    ```
-
-3.  **Configura la URL del Webhook:** `ngrok` te dará una URL pública (`Forwarding`) que empieza por `https://`. Cópiala.
-    - Abre tu archivo `.env`.
-    - Pega la URL en la variable `WEBHOOK_URL`.
-
-4.  **Reinicia n8n:** Aplica los cambios reiniciando el contenedor de `n8n` para que utilice la nueva URL pública.
-    ```bash
-    docker compose restart n8n
-    ```
-
-¡Listo! Ahora puedes acceder a tu instancia de n8n a través de la URL de ngrok. Cuando crees un webhook en n8n, usará automáticamente esta dirección pública, permitiéndote recibir datos de servicios externos en tu entorno de desarrollo local.
-
-### Gestión del Entorno
-
-**Comandos útiles con `docker compose`:**
+### **2. Configuración del entorno**
 ```bash
-# Parar todos los servicios
-docker compose down
-
-# Ver logs del backend
-docker logs macroferro_backend
-
-# Reconstruir solo el backend
-docker compose up --build backend
-
-# Acceso al contenedor del backend
-docker exec -it macroferro_backend bash
-
-# Reiniciar un servicio específico
-docker compose restart backend
+cp .env.example .env
 ```
 
-**Comandos útiles con `Makefile`:**
-El proyecto incluye un `Makefile` para simplificar las operaciones comunes. Ejecuta `make help` para ver todos los comandos. Los más importantes son:
+Edita el archivo `.env` con tus credenciales:
+- **OpenAI API Key** para funcionalidades de IA
+- **Telegram Bot Token** para el bot
+- **PostgreSQL** y **Qdrant** (ya configurados)
 
+### **3. Inicio de servicios**
 ```bash
-# Levantar todos los servicios
 make up
-
-# Detener todos los servicios
-make down
-
-# Ver logs del backend en tiempo real
-make logs-backend
-
-# Actualizar el catálogo de productos con IA
-make update-catalog
-
-# Probar la búsqueda semántica con una consulta
-make search-test query="tu búsqueda aquí"
 ```
+
+### **4. Acceso a servicios**
+- **API Backend:** http://localhost:8000
+- **PgAdmin:** http://localhost:5433
+- **Qdrant:** http://localhost:6333
 
 ---
 
-## Próximos Pasos: **FASE 2**
+## 🎯 **Próximos Pasos**
 
-### 🎯 **Objetivos de la Fase 2: Gestión de Inventario y Stock**
-
-1. **API de Stock y Almacenes:**
-   - Endpoints para consulta de inventario
-   - Gestión de múltiples almacenes
-   - Histórico de movimientos de stock
-   - Alertas de stock mínimo
-
-2. **API de Gestión de Imágenes:**
-   - Upload y almacenamiento de imágenes
-   - Redimensionado automático
-   - Asociación con productos
-   - Optimización de carga
-
-3. **Sistema de Autenticación:**
-   - JWT para autenticación
-   - Roles y permisos
-   - Gestión de sesiones
-   - Integración con Redis
-
-4. **Optimizaciones y Mejoras:**
-   - Caché de consultas frecuentes
-   - Índices de base de datos
-   - Paginación avanzada
-   - Filtros complejos
+1. **Sistema de autenticación** (JWT, roles de usuario)
+2. **API de inventario** (gestión de stock y almacenes)
+3. **API de clientes** (gestión B2B completa)
+4. **API de facturación** (órdenes, pagos y reportes)
+5. **Dashboard administrativo** (interfaz web de gestión)
+6. **Bot de Telegram avanzado** (comandos adicionales y funcionalidades)
 
 ---
 
@@ -364,8 +256,8 @@ make search-test query="tu búsqueda aquí"
          │                                              │
          ▼                                              ▼
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│     PgAdmin     │    │     Qdrant      │    │    n8n Future  │
-│   (Port 5050)   │    │   (Port 6333)   │    │  (Port 5678)    │
+│     PgAdmin     │    │     Qdrant      │    │    OpenAI      │
+│   (Port 5050)   │    │   (Port 6333)   │    │    (IA)        │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 

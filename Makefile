@@ -44,7 +44,7 @@ up: ## ⬆️ Levantar todos los servicios
 	@echo "$(BLUE)🐘 PgAdmin: http://localhost:5050$(NC)"
 	@echo "$(BLUE)🔍 Qdrant: http://localhost:6333$(NC)"
 	@echo "$(BLUE)🔍 Redis: http://localhost:6379$(NC)"
-	@echo "$(BLUE)🧩 N8N: http://localhost:5678$(NC)"
+	@echo "$(GREEN)============================================$(NC)"
 
 down: ## ⬇️ Bajar todos los servicios
 	@echo "$(YELLOW)⬇️ Bajando servicios...$(NC)"

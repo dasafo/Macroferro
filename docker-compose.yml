@@ -69,35 +69,6 @@ services:
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET}
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
-  n8n:
-    image: n8nio/n8n
-    container_name: macroferro_n8n
-    restart: unless-stopped
-    ports:
-      - "5678:5678" # Puerto por defecto de n8n
-    environment:
-      # --- Configuración para desarrollo local con NGROK ---
-      # 1. Inicia ngrok en otra terminal: ngrok http 5678
-      # 2. Copia la URL "Forwarding" de ngrok (ej: https://xxxx.ngrok-free.app)
-      # 3. Pega esa URL en tu archivo .env en la variable WEBHOOK_URL
-      # 4. Levanta el contenedor: docker-compose up -d n8n (o reinícialo: docker-compose restart n8n)
-      - WEBHOOK_URL=${WEBHOOK_URL} # Esta variable es CRUCIAL. Debe ser la URL pública que te da ngrok.
-
-      - GENERIC_TIMEZONE=Europe/Madrid # O tu zona horaria
-      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY} # ¡IMPORTANTE! Para encriptar credenciales.
-      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE}
-      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
-      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
-
-      # --- Las siguientes variables son para un dominio personalizado y NO se usan con ngrok gratuito ---
-      # - N8N_HOST=${N8N_SUBDOMAIN}.${N8N_DOMAIN_NAME}
-      # - N8N_PROTOCOL=${N8N_PROTOCOL}
-    volumes:
-      - n8n_data:/home/node/.n8n # Persistir datos de n8n (workflows, credenciales)
-    depends_on: # Opcional, pero bueno si n8n necesita llamar al backend al inicio
-      - backend
-
 volumes:
   postgres_data:
   qdrant_storage:
-  n8n_data:

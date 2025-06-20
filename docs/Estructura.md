@@ -8,7 +8,7 @@ A continuación encontrarás una explicación pormenorizada del propósito de **
 
 | Elemento             | Descripción                                                                                                              | Cuándo lo tocarás                                                                   |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| `docker-compose.yml` | Orquesta todos los servicios (PostgreSQL, Redis, Qdrant, backend, n8n…). Define redes, volúmenes y variables de entorno. | Cuando quieras levantar / parar todos los contenedores o cambiar puertos/volúmenes. |
+| `docker-compose.yml` | Orquesta todos los servicios (PostgreSQL, Redis, Qdrant, backend). Define redes, volúmenes y variables de entorno. | Cuando quieras levantar / parar todos los contenedores o cambiar puertos/volúmenes. |
 | `LICENSE`            | Licencia de uso del código (p. ej. MIT, Apache 2).                                                                       | Solo si cambias la licencia.                                                        |
 | `README.md`          | Introducción general, instrucciones de uso rápido y enlaces.                                                             | Mantenla al día para onboarding de colaboradores.                                   |
 | `docs/`              | Documentación de alto nivel.                                                                                             | Añadir tutoriales, diagramas, etc.                                                  |
@@ -29,9 +29,9 @@ Imagen Docker que compila los requisitos e inicia Uvicorn. Cambia aquí la versi
 
 Lista de dependencias Python para `pip install -r`. Alinear con `poetry`/`pip-tools` si los usas.
 
-### 2.3 `backend/n8n_data/`
+### 2.3 `backend/logs/`
 
-Volumen mapeado donde n8n guarda workflows y credenciales cuando se inicia como servicio adicional.
+Directorio donde se almacenan los logs del backend cuando se ejecuta en producción.
 
 ### 2.4 Código fuente (`backend/app/`)
 
