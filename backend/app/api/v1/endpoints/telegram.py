@@ -1,16 +1,21 @@
-from fastapi import APIRouter, HTTPException, Header, BackgroundTasks, Depends
-from typing import Optional
-import hmac
-import hashlib
 import logging
+from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
+from typing import Optional
+import hashlib
+import hmac
+import json
 
-from app.schemas.telegram import TelegramUpdate, TelegramResponse
-from app.services.telegram_service import telegram_service
 from app.core.config import settings
 from app.api.deps import get_db
+from app.schemas.telegram import TelegramUpdate
+from app.services.telegram_service import TelegramBotService
 
 logger = logging.getLogger(__name__)
+
+# Inicializar servicio de Telegram
+telegram_service = TelegramBotService() if settings.telegram_bot_token else None
+
 router = APIRouter()
 
 def verify_telegram_webhook(
@@ -25,63 +30,143 @@ def verify_telegram_webhook(
 
 @router.post("/webhook")
 async def telegram_webhook(
-    update: TelegramUpdate,
+    request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    x_telegram_bot_api_secret_token: Optional[str] = Header(None)
+    db: Session = Depends(get_db)
 ):
     """
-    Webhook para recibir actualizaciones de Telegram
-    """
-    if not telegram_service:
-        raise HTTPException(status_code=503, detail="Telegram service not configured")
+    Webhook para recibir actualizaciones de Telegram.
     
+    Este endpoint procesa mensajes entrantes de Telegram de forma asíncrona
+    para proporcionar respuestas rápidas y naturales a los usuarios.
+    
+    Características:
+    - Validación de autenticidad del webhook (opcional)
+    - Procesamiento en background para no bloquear Telegram
+    - Manejo robusto de errores
+    - Logging detallado para monitoreo
+    
+    Flow:
+    1. Validar webhook secret si está configurado
+    2. Parsear update de Telegram
+    3. Procesar mensaje en background
+    4. Retornar 200 inmediatamente para evitar timeouts
+    """
     try:
-        # Verificar que la request viene de Telegram
-        if settings.telegram_webhook_secret and not verify_telegram_webhook(
-            body=b"",  # En producción, verificar el body completo
-            secret_token=settings.telegram_webhook_secret,
-            x_telegram_bot_api_secret_token=x_telegram_bot_api_secret_token
-        ):
-            logger.warning("Unauthorized webhook request")
-            raise HTTPException(status_code=401, detail="Unauthorized")
+        # Obtener cuerpo de la request
+        body = await request.body()
         
-        # Procesar solo mensajes de texto
-        if not update.message or not update.message.text:
-            return {"status": "ok"}
+        # Validar webhook secret si está configurado
+        if settings.telegram_webhook_secret:
+            signature = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+            if not signature:
+                logger.warning("Webhook sin signature, rechazando")
+                raise HTTPException(status_code=401, detail="Missing signature")
+            
+            # Validar signature
+            expected_signature = settings.telegram_webhook_secret
+            if signature != expected_signature:
+                logger.warning("Webhook con signature inválida, rechazando")
+                raise HTTPException(status_code=401, detail="Invalid signature")
         
-        message = update.message
-        user_message = message.text
-        chat_id = message.chat.id
+        # Parsear update de Telegram
+        try:
+            update_data = json.loads(body.decode())
+            update = TelegramUpdate(**update_data)
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parseando JSON del webhook: {e}")
+            raise HTTPException(status_code=400, detail="Invalid JSON")
+        except Exception as e:
+            logger.error(f"Error validando update de Telegram: {e}")
+            raise HTTPException(status_code=400, detail="Invalid update format")
         
-        logger.info(f"Mensaje recibido de chat {chat_id}: {user_message}")
-        
-        # Procesar mensaje en background para respuesta rápida
-        background_tasks.add_task(
-            process_and_respond, 
-            db,
-            user_message, 
-            chat_id
-        )
+        # Procesar mensaje en background
+        if update.message and update.message.text:
+            background_tasks.add_task(
+                process_and_respond_multiple,
+                db,
+                update.message.text,
+                update.message.chat.id
+            )
+            logger.info(f"Mensaje de chat {update.message.chat.id} agregado a cola de procesamiento")
+        else:
+            logger.info("Update sin mensaje de texto, ignorando")
         
         return {"status": "ok"}
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error en webhook de Telegram: {e}")
+        logger.error(f"Error inesperado en webhook: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+async def process_and_respond_multiple(db: Session, user_message: str, chat_id: int):
+    """
+    Procesar mensaje y enviar múltiples respuestas naturales.
+    
+    Esta función orquesta el procesamiento inteligente del mensaje
+    y el envío secuencial de respuestas para crear una experiencia
+    de conversación más natural y fluida.
+    
+    Args:
+        db: Sesión de base de datos
+        user_message: Mensaje del usuario
+        chat_id: ID del chat donde responder
+        
+    Características:
+    - Procesamiento inteligente con IA
+    - División automática de respuestas largas
+    - Envío secuencial con delays naturales
+    - Manejo robusto de errores
+    - Fallback para errores de envío individual
+    """
+    if not telegram_service:
+        logger.error("Telegram service not configured")
+        return
+        
+    try:
+        # Procesar mensaje con IA para obtener múltiples respuestas
+        response_messages = await telegram_service.process_message(db, user_message, chat_id)
+        
+        if not response_messages:
+            logger.warning(f"No se generaron respuestas para chat {chat_id}")
+            response_messages = ["❌ Lo siento, hubo un problema procesando tu mensaje."]
+        
+        # Enviar mensajes secuencialmente con delays naturales
+        delay = 1.5 if len(response_messages) > 1 else 0
+        await telegram_service.send_multiple_messages(
+            chat_id=chat_id,
+            messages=response_messages,
+            delay_between_messages=delay
+        )
+        
+        logger.info(f"Conversación completada para chat {chat_id}: {len(response_messages)} mensajes enviados")
+        
+    except Exception as e:
+        logger.error(f"Error procesando mensaje: {e}")
+        # Enviar mensaje de error al usuario
+        try:
+            await telegram_service.send_message(
+                chat_id, 
+                "❌ Lo siento, hubo un error procesando tu mensaje. Por favor intenta nuevamente."
+            )
+        except:
+            logger.error(f"No se pudo enviar mensaje de error a chat {chat_id}")
+
+# Mantener función original para compatibilidad
 async def process_and_respond(db: Session, user_message: str, chat_id: int):
-    """Procesar mensaje y enviar respuesta"""
+    """Procesar mensaje y enviar respuesta (versión original para compatibilidad)"""
     if not telegram_service:
         logger.error("Telegram service not configured")
         return
         
     try:
         # Procesar mensaje con IA
-        response_text = await telegram_service.process_message(db, user_message, chat_id)
+        response_messages = await telegram_service.process_message(db, user_message, chat_id)
         
-        # Enviar respuesta
-        await telegram_service.send_message(chat_id, response_text)
+        # Enviar solo el primer mensaje para mantener compatibilidad
+        if response_messages:
+            await telegram_service.send_message(chat_id, response_messages[0])
         
         logger.info(f"Respuesta enviada a chat {chat_id}")
         
@@ -123,6 +208,16 @@ async def set_webhook():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/health")
-async def telegram_health():
-    """Health check para el bot de Telegram"""
-    return {"status": "ok", "service": "telegram_bot"} 
+async def health_check():
+    """
+    Endpoint de health check para verificar que el bot está funcionando.
+    
+    Returns:
+        Status del servicio y configuración básica
+    """
+    return {
+        "status": "ok",
+        "service": "telegram_bot",
+        "configured": telegram_service is not None,
+        "webhook_url": settings.telegram_webhook_url or "not_configured"
+    } 
