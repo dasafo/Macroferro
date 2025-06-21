@@ -28,7 +28,7 @@ COMMENT ON TABLE clients IS 'Información de los clientes de Macroferro.';
 
 -- Tabla de Almacenes
 CREATE TABLE IF NOT EXISTS warehouses (
-    warehouse_id VARCHAR(50) PRIMARY KEY,
+    warehouse_id INT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     address TEXT
 );
@@ -92,7 +92,7 @@ COMMENT ON TABLE product_images IS 'Tabla de unión para asociar múltiples imá
 CREATE TABLE IF NOT EXISTS stock (
     stock_id SERIAL PRIMARY KEY,
     sku VARCHAR(50) NOT NULL,
-    warehouse_id VARCHAR(50) NOT NULL,
+    warehouse_id INT NOT NULL,
     quantity INT NOT NULL CHECK (quantity >= 0),
     CONSTRAINT fk_product_stock FOREIGN KEY(sku) REFERENCES products(sku) ON DELETE CASCADE,
     CONSTRAINT fk_warehouse_stock FOREIGN KEY(warehouse_id) REFERENCES warehouses(warehouse_id) ON DELETE CASCADE,

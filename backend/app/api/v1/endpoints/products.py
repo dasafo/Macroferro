@@ -498,7 +498,11 @@ async def search_products(
         # Devolver una respuesta vacía pero bien formada si no hay resultados
         return product_schema.ProductSearchResponse(main_results=[], related_results=[])
 
-    return search_results
+    # Convertir a ProductSearchResponse para que Pydantic serialice correctamente las relaciones
+    return product_schema.ProductSearchResponse(
+        main_results=search_results["main_results"],
+        related_results=search_results["related_results"]
+    )
 
 # ========================================
 # CONFIGURACIÓN Y METADATOS
