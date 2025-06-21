@@ -17,7 +17,7 @@ Patrón de esquemas utilizado:
 """
 
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 # ========================================
 # ESQUEMA BASE
@@ -87,7 +87,7 @@ class CategoryResponse(CategoryBase):
     Usado en endpoints GET. Incluye todos los campos que se devuelven al cliente,
     incluyendo el category_id que se genera/lee desde la base de datos.
     
-    La configuración orm_mode=True permite que Pydantic convierta automáticamente
+    La configuración from_attributes=True permite que Pydantic convierta automáticamente
     objetos SQLAlchemy a JSON, facilitando la integración entre el ORM y la API.
     
     Ejemplo de respuesta:
@@ -102,20 +102,9 @@ class CategoryResponse(CategoryBase):
     
     # Extensión futura: categorías anidadas
     # Si quisiéramos incluir las subcategorías directamente en la respuesta:
-    # children: List["CategoryResponse"] = []  # Requiere forward reference y orm_mode
+    # children: List["CategoryResponse"] = []  # Requiere forward reference y from_attributes
 
-    class Config:
-        """
-        Configuración de Pydantic para este esquema.
-        
-        orm_mode = True: Permite que Pydantic lea datos directamente desde 
-        modelos SQLAlchemy sin necesidad de convertir manualmente a diccionario.
-        
-        Esto significa que podemos hacer:
-        category_orm = db.query(Category).first()
-        return CategoryResponse.from_orm(category_orm)
-        """
-        orm_mode = True  # Permite que Pydantic lea datos directamente desde modelos SQLAlchemy
+    model_config = ConfigDict(from_attributes=True)  # Permite que Pydantic lea datos directamente desde modelos SQLAlchemy
 
 # ========================================
 # RESOLUCIÓN DE REFERENCIAS FUTURAS

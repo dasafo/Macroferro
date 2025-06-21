@@ -66,6 +66,19 @@ class Product(Base):
     # Relación con items de facturas
     invoice_items = relationship("InvoiceItem", back_populates="product")
 
+    @property
+    def images(self):
+        """
+        Propiedad de conveniencia para acceder directamente a las imágenes del producto.
+        
+        Extrae las imágenes de la relación images_association para facilitar
+        la serialización con Pydantic, que espera una propiedad 'images'.
+        
+        Returns:
+            List[Image]: Lista de objetos Image asociados al producto
+        """
+        return [assoc.image for assoc in self.images_association if assoc.image]
+
 
 class Image(Base):
     """

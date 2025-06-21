@@ -374,6 +374,7 @@ async def read_product(
     product = product_service.get_product_by_sku_details(db=db, sku=sku)
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    
     return product
 
 

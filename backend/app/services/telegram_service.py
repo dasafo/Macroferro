@@ -48,6 +48,7 @@ import os
 
 from app.core.config import settings
 from app.services.product_service import ProductService
+from app.crud.product_crud import get_product_by_sku, get_products
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +196,83 @@ class TelegramBotService:
             logger.error(f"Error inesperado enviando mensaje de Telegram a chat {chat_id}: {e}")
             raise
 
+    async def send_photo(self, chat_id: int, photo_url: str, caption: str = "", parse_mode: str = "Markdown") -> Dict[str, Any]:
+        """
+        Envía una foto a un chat específico a través del API de Telegram.
+        
+        Esta función permite enviar imágenes directamente desde URLs, con soporte
+        para captions formateados y manejo robusto de errores específicos de imágenes.
+        
+        Args:
+            chat_id: ID único del chat donde enviar la foto
+            photo_url: URL de la imagen a enviar (debe ser accesible públicamente)
+            caption: Texto descriptivo de la imagen (opcional, máximo 1024 caracteres)
+            parse_mode: Formato del caption ("Markdown", "HTML", o None)
+            
+        Returns:
+            Respuesta JSON del API de Telegram con detalles de la foto enviada
+            
+        Características:
+        - Soporte para URLs públicas de imágenes
+        - Caption con formato Markdown/HTML
+        - Validación automática de formato de imagen
+        - Manejo específico de errores de media
+        
+        Formatos de imagen soportados por Telegram:
+        - JPG, PNG, GIF, BMP, WEBP
+        - Tamaño máximo: 10MB para fotos
+        - Resolución máxima: 1280x1280 píxeles
+        
+        Limitaciones del caption:
+        - Máximo 1024 caracteres
+        - Mismo formato Markdown que mensajes de texto
+        
+        Casos de uso:
+        - Mostrar imágenes de productos en catálogo
+        - Enviar fotos de referencia técnica
+        - Compartir diagramas o esquemas
+        
+        Manejo de errores específicos:
+        - URL inaccesible o imagen corrupta
+        - Formato de imagen no soportado
+        - Imagen demasiado grande
+        - Problemas de conectividad
+        """
+        if not self.api_base_url:
+            logger.error("Bot token no configurado, no se puede enviar foto")
+            raise ValueError("Telegram bot token not configured")
+            
+        url = f"{self.api_base_url}/sendPhoto"
+        payload = {
+            "chat_id": chat_id,
+            "photo": photo_url,
+            "caption": caption,
+            "parse_mode": parse_mode
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:  # Timeout más largo para imágenes
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                
+                result = response.json()
+                logger.info(f"Foto enviada exitosamente a chat {chat_id} desde URL: {photo_url}")
+                return result
+                
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout enviando foto a chat {chat_id} desde {photo_url}: {e}")
+            raise
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Error HTTP enviando foto a chat {chat_id} desde {photo_url}: {e.response.status_code} - {e.response.text}")
+            # Los errores comunes incluyen:
+            # - 400 Bad Request: URL de imagen inválida o inaccesible
+            # - 413 Payload Too Large: Imagen demasiado grande
+            # - 415 Unsupported Media Type: Formato no soportado
+            raise
+        except Exception as e:
+            logger.error(f"Error inesperado enviando foto de Telegram a chat {chat_id} desde {photo_url}: {e}")
+            raise
+
     async def send_multiple_messages(self, chat_id: int, messages: List[str], delay_between_messages: float = 1.0) -> List[Dict[str, Any]]:
         """
         Envía múltiples mensajes de forma secuencial con delay entre cada uno.
@@ -224,6 +302,88 @@ class TelegramBotService:
                 logger.error(f"Error enviando mensaje {i+1}/{len(messages)}: {e}")
                 # Continuar con los siguientes mensajes aunque uno falle
                 results.append({"error": str(e)})
+        
+        return results
+
+    async def send_product_with_image(self, chat_id: int, product, caption: str, additional_messages: List[str] = None, delay_between_messages: float = 1.5) -> List[Dict[str, Any]]:
+        """
+        Envía información de un producto con su imagen (si está disponible) seguido de mensajes adicionales.
+        
+        Esta función coordina el envío de fotos de productos con información detallada,
+        creando una experiencia visual rica para consultas específicas de productos.
+        
+        Args:
+            chat_id: ID del chat donde enviar la información
+            product: Objeto Product con relaciones cargadas (categoría, imágenes)
+            caption: Texto para acompañar la imagen (información básica del producto)
+            additional_messages: Lista de mensajes adicionales a enviar después de la foto
+            delay_between_messages: Tiempo en segundos entre mensajes
+            
+        Returns:
+            Lista con las respuestas del API de Telegram para cada envío
+            
+        Flujo de envío:
+        1. Si el producto tiene imagen: envía foto con caption
+        2. Si no tiene imagen: envía mensaje de texto con información básica
+        3. Envía mensajes adicionales con delay para simular conversación natural
+        
+        Manejo de imágenes:
+        - Prioriza la primera imagen asociada al producto
+        - Fallback graceful si la imagen no está disponible o falla
+        - Caption limitado a 1024 caracteres (límite de Telegram)
+        """
+        results = []
+        
+        # Verificar si el producto tiene imágenes asociadas
+        has_image = False
+        image_url = None
+        
+        if hasattr(product, 'images_association') and product.images_association:
+            # Obtener la primera imagen asociada
+            first_image_association = product.images_association[0]
+            if hasattr(first_image_association, 'image') and first_image_association.image:
+                image_url = str(first_image_association.image.url)
+                has_image = True
+                logger.info(f"Producto {product.sku} tiene imagen: {image_url}")
+        
+        # Limitar el caption a 1024 caracteres (límite de Telegram para fotos)
+        truncated_caption = caption[:1020] + "..." if len(caption) > 1024 else caption
+        
+        try:
+            if has_image and image_url:
+                # Enviar foto con caption
+                result = await self.send_photo(chat_id, image_url, truncated_caption)
+                results.append(result)
+                logger.info(f"Foto del producto {product.sku} enviada exitosamente")
+            else:
+                # Fallback: enviar como mensaje de texto si no hay imagen
+                result = await self.send_message(chat_id, caption)
+                results.append(result)
+                logger.info(f"Información del producto {product.sku} enviada como texto (sin imagen)")
+                
+        except Exception as e:
+            logger.error(f"Error enviando foto del producto {product.sku}: {e}")
+            # Fallback: enviar como mensaje de texto
+            try:
+                result = await self.send_message(chat_id, caption)
+                results.append(result)
+                logger.info(f"Enviado como texto después de fallo de imagen para producto {product.sku}")
+            except Exception as text_error:
+                logger.error(f"Error enviando fallback de texto para producto {product.sku}: {text_error}")
+                results.append({"error": str(text_error)})
+        
+        # Enviar mensajes adicionales con delay
+        if additional_messages:
+            for i, message in enumerate(additional_messages):
+                await asyncio.sleep(delay_between_messages)
+                
+                try:
+                    result = await self.send_message(chat_id, message)
+                    results.append(result)
+                    logger.info(f"Mensaje adicional {i+1}/{len(additional_messages)} enviado para producto {product.sku}")
+                except Exception as e:
+                    logger.error(f"Error enviando mensaje adicional {i+1} para producto {product.sku}: {e}")
+                    results.append({"error": str(e)})
         
         return results
 
@@ -292,7 +452,7 @@ class TelegramBotService:
     # PROCESAMIENTO INTELIGENTE DE MENSAJES
     # ========================================
     
-    async def process_message(self, db: Session, message_text: str, chat_id: int) -> List[str]:
+    async def process_message(self, db: Session, message_text: str, chat_id: int) -> Dict[str, Any]:
         """
         Procesa un mensaje del usuario con inteligencia contextual avanzada.
         
@@ -302,12 +462,24 @@ class TelegramBotService:
         3. Proporcionar información técnica específica
         4. Mantener conversaciones naturales y contextuales
         5. Manejar múltiples tipos de consulta de forma inteligente
+        6. Enviar fotos de productos cuando estén disponibles
         
         El procesamiento se hace con un LLM más potente para mejor comprensión contextual.
+        
+        Returns:
+            Dict con el tipo de respuesta y datos necesarios:
+            - 'type': 'product_with_image' | 'text_messages'
+            - 'messages': Lista de mensajes de texto (para text_messages)
+            - 'product': Objeto producto (para product_with_image)
+            - 'caption': Caption para la imagen (para product_with_image) 
+            - 'additional_messages': Mensajes adicionales (para product_with_image)
         """
         if not self.openai_client:
             logger.warning("OpenAI no configurado, usando respuesta estática")
-            return ["🤖 Hola! Soy el asistente de Macroferro. El servicio de IA no está disponible en este momento."]
+            return {
+                "type": "text_messages",
+                "messages": ["🤖 Hola! Soy el asistente de Macroferro. El servicio de IA no está disponible en este momento."]
+            }
         
         try:
             # ========================================
@@ -388,21 +560,30 @@ Ejemplos:
                 return await self._handle_specific_product_inquiry(db, analysis, message_text)
             
             elif intent_type == "product_search":
-                return await self._handle_product_search(db, analysis, message_text)
+                messages = await self._handle_product_search(db, analysis, message_text)
+                return {"type": "text_messages", "messages": messages}
             
             elif intent_type == "technical_question":
-                return await self._handle_technical_question(db, analysis, message_text)
+                messages = await self._handle_technical_question(db, analysis, message_text)
+                return {"type": "text_messages", "messages": messages}
             
             else:  # general_conversation
-                return await self._handle_conversational_response(message_text, analysis)
+                messages = await self._handle_conversational_response(message_text, analysis)
+                return {"type": "text_messages", "messages": messages}
             
         except asyncio.TimeoutError:
             logger.error(f"Timeout procesando mensaje de chat {chat_id}")
-            return ["⏱️ Lo siento, el procesamiento está tomando más tiempo del esperado. Por favor intenta nuevamente."]
+            return {
+                "type": "text_messages",
+                "messages": ["⏱️ Lo siento, el procesamiento está tomando más tiempo del esperado. Por favor intenta nuevamente."]
+            }
             
         except Exception as e:
             logger.error(f"Error procesando mensaje de chat {chat_id}: {e}")
-            return ["❌ Lo siento, hubo un error procesando tu mensaje. Por favor intenta nuevamente."]
+            return {
+                "type": "text_messages", 
+                "messages": ["❌ Lo siento, hubo un error procesando tu mensaje. Por favor intenta nuevamente."]
+            }
 
     def _extract_json_from_markdown(self, content: str) -> str:
         """Extrae JSON de bloques de código markdown."""
@@ -419,75 +600,117 @@ Ejemplos:
         # Si no hay bloques de código, devolver el contenido original
         return content.strip()
 
-    async def _handle_specific_product_inquiry(self, db: Session, analysis: Dict, message_text: str) -> List[str]:
+    async def _handle_specific_product_inquiry(self, db: Session, analysis: Dict, message_text: str) -> Dict[str, Any]:
         """
-        Maneja consultas específicas sobre un producto particular.
+        Maneja consultas sobre productos específicos con búsqueda inteligente.
         
-        Esta función busca primero por nombre exacto, luego por nombre parcial,
-        y proporciona información detallada del producto específico.
+        Returns:
+            Dict con tipo, producto y mensajes estructurados para el envío
         """
-        specific_product = analysis.get("specific_product_mentioned")
-        search_terms = analysis.get("search_terms", [])
-        
-        # Asegurar que search_terms sea una lista
-        if search_terms is None:
-            search_terms = []
-        
-        if specific_product:
-            search_terms.insert(0, specific_product)
-        
-        logger.info(f"Buscando información específica de producto: {search_terms}")
-        
-        # Intentar encontrar el producto específico por nombre
-        found_product = None
-        
-        # 1. Buscar por nombre exacto en la base de datos
-        for term in search_terms:
-            if not term:
-                continue
+        try:
+            specific_product = analysis.get("specific_product_mentioned")
+            if not specific_product:
+                # Extraer posibles nombres de productos del mensaje
+                # Buscar palabras clave de productos comunes
+                search_terms = analysis.get("search_terms", [])
+                if not search_terms:
+                    search_terms = [message_text]
+            else:
+                search_terms = [specific_product]
+            
+            logger.info(f"Buscando producto específico: {search_terms}")
+            
+            # 1. Intentar búsqueda exacta por SKU primero
+            product = None
+            for term in search_terms:
+                # Intentar como SKU
+                product = get_product_by_sku(db, term.upper())
+                if product:
+                    break
+                    
+                # Intentar búsqueda exacta por nombre
+                products = get_products(db, name_like=term, limit=5)
+                if products:
+                    # Buscar coincidencia exacta
+                    for p in products:
+                        if p.name.lower() == term.lower():
+                            product = p
+                            break
+                    
+                    # Si no hay coincidencia exacta, tomar el primer resultado si es similar
+                    if not product and products:
+                        # Verificar si el primer resultado es suficientemente similar
+                        first_product = products[0]
+                        if term.lower() in first_product.name.lower() or first_product.name.lower() in term.lower():
+                            product = first_product
                 
-            # Buscar por nombre parcial en la base de datos
-            from app.crud import product_crud
-            products = product_crud.get_products(
-                db=db, 
-                name_like=term.strip(),
-                limit=1  # Solo necesitamos el primer resultado exacto
-            )
+                if product:
+                    break
             
-            if products:
-                found_product = products[0]
-                logger.info(f"Producto encontrado por nombre: {found_product.name}")
-                break
-        
-        # 2. Si no se encontró por nombre exacto, usar búsqueda semántica
-        if not found_product and search_terms:
-            search_query = " ".join(search_terms)
-            search_results = await self.product_service.search_products(
-                db=db,
-                query_text=search_query,
-                top_k=1  # Solo el más relevante
-            )
+            # 2. Si no encontramos producto por búsqueda directa, usar búsqueda semántica
+            if not product:
+                logger.info("No se encontró producto directo, usando búsqueda semántica")
+                search_results = await self.product_service.search_products(
+                    db=db,
+                    query_text=message_text,
+                    top_k=3,
+                    similarity_threshold=0.7  # Umbral alto para consultas específicas
+                )
+                
+                main_products = search_results.get("main_results", [])
+                if main_products:
+                    # Solo tomar el mejor resultado si tiene alta similitud
+                    product = main_products[0]
+                    logger.info(f"Producto encontrado por búsqueda semántica: {product.name}")
             
-            main_results = search_results.get("main_results", [])
-            if main_results:
-                found_product = main_results[0]
-                logger.info(f"Producto encontrado por búsqueda semántica: {found_product.name}")
-        
-        if not found_product:
-            return [
-                "🔍 Hmm, no encontré información específica sobre ese producto.",
-                "💡 ¿Podrías ser más específico con el nombre o modelo?\n\nTambién puedo ayudarte a buscar productos si me dices qué tipo de producto necesitas."
-            ]
-        
-        # ========================================
-        # GENERAR RESPUESTA DETALLADA DEL PRODUCTO
-        # ========================================
-        
-        return await self._generate_detailed_product_response(found_product, message_text)
+            if product:
+                # Generar respuesta detallada con imagen
+                product_response = await self._generate_detailed_product_response(product, message_text)
+                
+                return {
+                    "type": "product_with_image",
+                    "product": product,
+                    "caption": product_response["caption"],
+                    "additional_messages": product_response["additional_messages"],
+                    "messages": []  # No usado para este tipo
+                }
+            else:
+                # No se encontró producto específico
+                return {
+                    "type": "text_messages",
+                    "messages": [
+                        f"🔍 Busqué información específica sobre: *{message_text}*",
+                        "❌ No pude encontrar ese producto específico en nuestro catálogo.",
+                        "💡 Intenta con:",
+                        "• Nombre más específico o marca del producto",
+                        "• Código SKU si lo tienes",
+                        "• Categoría general (ej: 'herramientas', 'tubos', 'válvulas')",
+                        "🛠️ ¿Te puedo ayudar con alguna búsqueda más general?"
+                    ],
+                    "product": None,
+                    "caption": "",
+                    "additional_messages": []
+                }
+            
+        except Exception as e:
+            logger.error(f"Error en consulta específica de producto: {e}")
+            return {
+                "type": "text_messages",
+                "messages": ["❌ Hubo un error buscando ese producto. ¿Puedes intentar de nuevo?"],
+                "product": None,
+                "caption": "",
+                "additional_messages": []
+            }
 
-    async def _generate_detailed_product_response(self, product, original_question: str) -> List[str]:
+    async def _generate_detailed_product_response(self, product, original_question: str) -> Dict[str, Any]:
         """
         Genera una respuesta conversacional y detallada sobre un producto específico.
+        
+        Ahora retorna un diccionario con el caption para la imagen y mensajes adicionales
+        para crear una experiencia visual rica con la foto del producto.
+        
+        Returns:
+            Dict con 'caption' para la imagen y 'additional_messages' para envío secuencial
         """
         # Preparar información del producto para el LLM
         product_info = {
@@ -518,22 +741,28 @@ PRODUCTO ENCONTRADO:
 - Especificaciones técnicas: {json.dumps(product_info['specifications'], indent=2, ensure_ascii=False)}
 
 INSTRUCCIONES:
-1. Responde de forma conversacional y natural, como un vendedor experto que conoce bien el producto
-2. Enfócate en lo que el cliente preguntó específicamente
-3. Proporciona información técnica relevante de las especificaciones si las hay
-4. Menciona aplicaciones típicas y beneficios del producto
-5. Incluye el precio de forma natural en la conversación
-6. Si hay especificaciones técnicas, resáltalas de forma clara
-7. Mantén un tono profesional pero amigable
-8. Usa emojis apropiados para hacer la respuesta más visual
-9. Divide la respuesta en 2-3 mensajes naturales si es necesario (separa con "|||")
-10. Termina invitando a hacer más preguntas específicas
+Vas a enviar la información en dos partes:
+
+1. CAPTION DE IMAGEN (máximo 800 caracteres):
+   - Información básica y atractiva del producto
+   - Incluye nombre, precio, marca de forma visual
+   - Usa emojis apropiados
+   - Debe ser conciso pero informativo
+
+2. MENSAJES ADICIONALES (separa con "|||"):
+   - Detalles técnicos específicos
+   - Especificaciones importantes
+   - Aplicaciones recomendadas
+   - Invitación a más preguntas
 
 Formato de respuesta:
-- Usa *texto* para negrita
-- Usa formato de lista con • para especificaciones
-- Incluye emojis técnicos apropiados (🔧 ⚙️ 📐 💧 ⚡ 🏗️ etc.)
+CAPTION:
+[Tu caption de máximo 800 caracteres]
 
+ADDITIONAL:
+[Mensaje 1]|||[Mensaje 2]|||[Mensaje 3]
+
+Usa *texto* para negrita, formato de lista con • para especificaciones, y emojis técnicos apropiados.
 Responde en español de manera profesional y útil.
 """
         
@@ -542,23 +771,35 @@ Responde en español de manera profesional y útil.
             model="gpt-4o-mini-2024-07-18",
             messages=[{"role": "user", "content": response_prompt}],
             temperature=0.7,  # Temperatura moderada para naturalidad
-            max_tokens=800,   # Espacio suficiente para respuesta detallada
+            max_tokens=1000,   # Espacio para caption + mensajes adicionales
             timeout=20.0
         )
         
         response_text = response.choices[0].message.content
         
-        # Dividir respuesta si incluye el separador
-        if "|||" in response_text:
-            messages = [msg.strip() for msg in response_text.split("|||") if msg.strip()]
+        # Separar caption y mensajes adicionales
+        if "CAPTION:" in response_text and "ADDITIONAL:" in response_text:
+            parts = response_text.split("ADDITIONAL:")
+            caption = parts[0].replace("CAPTION:", "").strip()
+            additional_text = parts[1].strip()
+            
+            # Dividir mensajes adicionales
+            additional_messages = [msg.strip() for msg in additional_text.split("|||") if msg.strip()]
         else:
-            messages = self.split_response_into_messages(response_text, 3800)
+            # Fallback si el formato no es el esperado
+            messages = self.split_response_into_messages(response_text, 800)
+            caption = messages[0] if messages else f"*{product.name}*\n💰 ${product.price:,.2f}"
+            additional_messages = messages[1:] if len(messages) > 1 else []
         
-        return messages
+        return {
+            "caption": caption,
+            "additional_messages": additional_messages
+        }
 
     async def _handle_product_search(self, db: Session, analysis: Dict, message_text: str) -> List[str]:
         """
         Maneja búsquedas generales de productos con respuesta conversacional.
+        Aplica umbrales de similitud para evitar resultados irrelevantes.
         """
         search_terms = analysis.get("search_terms", [])
         
@@ -570,20 +811,38 @@ Responde en español de manera profesional y útil.
         
         logger.info(f"Realizando búsqueda general de productos para: {search_query}")
         
-        # Búsqueda semántica usando ProductService
+        # Búsqueda semántica usando ProductService con umbral moderado
         search_results = await self.product_service.search_products(
             db=db,
             query_text=search_query,
-            top_k=6  # Más productos para mejor selección
+            top_k=8,  # Más productos para mejor selección
+            similarity_threshold=0.5  # Umbral más bajo para búsquedas generales
         )
         
         main_products = search_results.get("main_results", [])
         related_products = search_results.get("related_results", [])
         
+        # Si no hay resultados con umbral bajo, definitivamente no hay nada relevante
         if not main_products and not related_products:
             return [
                 f"🔍 Busqué productos relacionados con: *{search_query}*",
-                "❌ No encontré productos específicos para esa búsqueda.\n\n💡 Puedes intentar con términos más generales como:\n• 'tubos'\n• 'válvulas'\n• 'conectores'\n• 'herramientas'\n• 'tornillos'\n• 'pinturas'"
+                "❌ No encontré productos que coincidan con esa búsqueda en nuestro catálogo.",
+                "💡 Te sugiero buscar con términos más generales:",
+                "• **Herramientas**: taladros, llaves, destornilladores",
+                "• **Materiales**: tubos, válvulas, conectores",
+                "• **Ferretería**: tornillos, tuercas, arandelas",
+                "• **Construcción**: cemento, pinturas, adhesivos",
+                "🛠️ ¿Hay alguna categoría específica que te interese?"
+            ]
+        
+        # Si hay muy pocos resultados, ser más cauteloso en la presentación
+        total_results = len(main_products) + len(related_products)
+        if total_results <= 2:
+            return [
+                f"🔍 Busqué productos para: *{search_query}*",
+                f"⚠️ Solo encontré {total_results} producto(s) relacionado(s).",
+                "Puede que la búsqueda sea muy específica o el producto no esté en nuestro catálogo.",
+                "💡 ¿Podrías proporcionar más detalles o usar términos más generales?"
             ]
         
         messages = []

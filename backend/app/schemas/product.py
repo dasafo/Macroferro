@@ -7,7 +7,7 @@ Este módulo define los esquemas para manejar productos en la API, incluyendo:
 - Validación de datos de entrada y salida
 - Manejo de relaciones anidadas (categorías, imágenes)
 - Validación y parseado de JSON para especificaciones técnicas
-- Integración con modelos SQLAlchemy mediante orm_mode
+- Integración con modelos SQLAlchemy mediante from_attributes
 
 Los productos son el núcleo del catálogo, con relaciones complejas hacia:
 - Categorías (many-to-one)
@@ -17,7 +17,7 @@ Los productos son el núcleo del catálogo, con relaciones complejas hacia:
 """
 
 from typing import Optional, List, Any, Dict
-from pydantic import BaseModel, HttpUrl, validator, Field
+from pydantic import BaseModel, HttpUrl, validator, Field, ConfigDict
 import json
 
 from .category import CategoryResponse # Importamos el schema de respuesta de categoría
@@ -38,8 +38,7 @@ class ImageResponse(BaseModel):
     url: HttpUrl  # URL de la imagen (validación automática de formato)
     alt_text: Optional[str] = None  # Texto alternativo para accesibilidad
 
-    class Config:
-        orm_mode = True  # Permite conversión desde modelo SQLAlchemy Image
+    model_config = ConfigDict(from_attributes=True)  # Permite conversión desde modelo SQLAlchemy Image
 
 
 # ========================================
@@ -204,21 +203,7 @@ class ProductResponse(ProductBase):
     # Esto requeriría lógica adicional en el endpoint para calcular:
     # total_stock = sum(stock.quantity for stock in product.stock_levels)
 
-    class Config:
-        """
-        Configuración de Pydantic para este esquema.
-        
-        orm_mode = True: Permite que Pydantic convierta automáticamente
-        objetos SQLAlchemy a JSON, incluyendo relaciones anidadas.
-        
-        Esto permite hacer:
-        product_orm = db.query(Product).options(
-            joinedload(Product.category),
-            joinedload(Product.images_association).joinedload(ProductImage.image)
-        ).first()
-        return ProductResponse.from_orm(product_orm)
-        """
-        orm_mode = True  # Permite que Pydantic lea datos directamente desde modelos SQLAlchemy
+    model_config = ConfigDict(from_attributes=True)  # Permite que Pydantic lea datos directamente desde modelos SQLAlchemy
 
 
 class ProductSearchQuery(BaseModel):
@@ -228,13 +213,14 @@ class ProductSearchQuery(BaseModel):
     query_text: str = Field(..., min_length=3, description="Texto de búsqueda para encontrar productos.")
     top_k: int = Field(default=10, ge=1, le=50, description="Número de resultados a devolver.")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "query_text": "Taladro",
                 "top_k": 10
             }
         }
+    )
 
 
 class ProductSearchResponse(BaseModel):
@@ -245,17 +231,32 @@ class ProductSearchResponse(BaseModel):
     main_results: List[ProductResponse] = Field(..., description="Los resultados más relevantes para la búsqueda.")
     related_results: List[ProductResponse] = Field(..., description="Resultados secundarios o sugerencias adicionales.")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "main_results": [
-                    # ... ejemplo de ProductResponse ...
+                    {
+                        "sku": "DRILL001",
+                        "name": "Taladro Eléctrico",
+                        "price": 89.99,
+                        "category": {"category_id": 5, "name": "Herramientas Eléctricas"},
+                        "images": [{"url": "https://example.com/drill.jpg", "alt_text": "Taladro"}],
+                        "spec_json": {"potencia": "800W"}
+                    }
                 ],
                 "related_results": [
-                    # ... ejemplo de ProductResponse ...
+                    {
+                        "sku": "DRILL002",
+                        "name": "Taladro Inalámbrico",
+                        "price": 120.00,
+                        "category": {"category_id": 5, "name": "Herramientas Eléctricas"},
+                        "images": [],
+                        "spec_json": {"potencia": "600W", "bateria": "12V"}
+                    }
                 ]
             }
         }
+    )
 
 
 # ========================================

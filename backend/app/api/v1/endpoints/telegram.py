@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, Dict, Any
 import hashlib
 import hmac
 import json
@@ -84,9 +84,9 @@ async def telegram_webhook(
         if update.message and update.message.text:
             background_tasks.add_task(
                 process_and_respond_multiple,
-                db,
-                update.message.text,
-                update.message.chat.id
+                update_data,
+                telegram_service,
+                db
             )
             logger.info(f"Mensaje de chat {update.message.chat.id} agregado a cola de procesamiento")
         else:
@@ -100,58 +100,53 @@ async def telegram_webhook(
         logger.error(f"Error inesperado en webhook: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-async def process_and_respond_multiple(db: Session, user_message: str, chat_id: int):
+async def process_and_respond_multiple(update_data: dict, bot_service: TelegramBotService, db: Session):
     """
-    Procesar mensaje y enviar múltiples respuestas naturales.
+    Procesa el mensaje del usuario y envía la respuesta con manejo de imágenes.
     
-    Esta función orquesta el procesamiento inteligente del mensaje
-    y el envío secuencial de respuestas para crear una experiencia
-    de conversación más natural y fluida.
-    
-    Args:
-        db: Sesión de base de datos
-        user_message: Mensaje del usuario
-        chat_id: ID del chat donde responder
-        
-    Características:
-    - Procesamiento inteligente con IA
-    - División automática de respuestas largas
-    - Envío secuencial con delays naturales
-    - Manejo robusto de errores
-    - Fallback para errores de envío individual
+    Ahora soporta:
+    - Envío de mensajes de texto múltiples
+    - Envío de productos con imágenes 
+    - Manejo inteligente según el tipo de consulta
     """
-    if not telegram_service:
-        logger.error("Telegram service not configured")
-        return
-        
     try:
-        # Procesar mensaje con IA para obtener múltiples respuestas
-        response_messages = await telegram_service.process_message(db, user_message, chat_id)
+        message = update_data.get("message", {})
+        chat_id = message.get("chat", {}).get("id")
+        text = message.get("text", "")
         
-        if not response_messages:
-            logger.warning(f"No se generaron respuestas para chat {chat_id}")
-            response_messages = ["❌ Lo siento, hubo un problema procesando tu mensaje."]
+        if not chat_id or not text:
+            logger.warning("Mensaje sin chat_id o texto válido")
+            return
         
-        # Enviar mensajes secuencialmente con delays naturales
-        delay = 1.5 if len(response_messages) > 1 else 0
-        await telegram_service.send_multiple_messages(
-            chat_id=chat_id,
-            messages=response_messages,
-            delay_between_messages=delay
-        )
+        logger.info(f"Procesando mensaje de chat {chat_id}: {text}")
         
-        logger.info(f"Conversación completada para chat {chat_id}: {len(response_messages)} mensajes enviados")
+        # Procesar mensaje con IA
+        response_data = await bot_service.process_message(db, text, chat_id)
         
-    except Exception as e:
-        logger.error(f"Error procesando mensaje: {e}")
-        # Enviar mensaje de error al usuario
-        try:
-            await telegram_service.send_message(
-                chat_id, 
-                "❌ Lo siento, hubo un error procesando tu mensaje. Por favor intenta nuevamente."
+        # Enviar respuesta según el tipo
+        if response_data.get("type") == "product_with_image":
+            # Enviar producto con imagen
+            await bot_service.send_product_with_image(
+                chat_id=chat_id,
+                product=response_data.get("product"),
+                caption=response_data.get("caption", ""),
+                additional_messages=response_data.get("additional_messages", [])
             )
-        except:
-            logger.error(f"No se pudo enviar mensaje de error a chat {chat_id}")
+        else:
+            # Enviar mensajes de texto múltiples (comportamiento por defecto)
+            messages = response_data.get("messages", ["Error procesando mensaje"])
+            await bot_service.send_multiple_messages(chat_id, messages)
+            
+    except Exception as e:
+        logger.error(f"Error en process_and_respond_multiple: {e}")
+        try:
+            # Mensaje de error de respaldo
+            await bot_service.send_message(
+                chat_id, 
+                "❌ Lo siento, hubo un error procesando tu consulta. Por favor intenta nuevamente."
+            )
+        except Exception as send_error:
+            logger.error(f"Error enviando mensaje de error: {send_error}")
 
 # Mantener función original para compatibilidad
 async def process_and_respond(db: Session, user_message: str, chat_id: int):
@@ -219,5 +214,19 @@ async def health_check():
         "status": "ok",
         "service": "telegram_bot",
         "configured": telegram_service is not None,
+        "webhook_url": settings.telegram_webhook_url or "not_configured"
+    }
+
+@router.get("/webhook/status")
+async def webhook_status():
+    """
+    Verifica el estado del webhook actual.
+    
+    Returns:
+        Dict con información sobre la configuración del webhook
+    """
+    return {
+        "status": "webhook endpoint configured",
+        "description": "Endpoint listo para recibir actualizaciones de Telegram",
         "webhook_url": settings.telegram_webhook_url or "not_configured"
     } 
