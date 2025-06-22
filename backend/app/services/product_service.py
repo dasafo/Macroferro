@@ -38,8 +38,9 @@ import logging
 from app.db import models
 from app.crud import product_crud, category_crud  # Removido image_crud hasta que se implemente
 from app.schemas import product as product_schema
-from openai import AsyncOpenAI # Usar cliente asíncrono
-from qdrant_client import AsyncQdrantClient, models as qdrant_models # Usar cliente asíncrono
+from openai import AsyncOpenAI, OpenAI # Usar cliente asíncrono
+from qdrant_client import AsyncQdrantClient, QdrantClient, models as qdrant_models # Usar cliente asíncrono
+from qdrant_client.models import Filter, FieldCondition, MatchValue
 from app.core.config import settings # Para acceder a QDRANT_URL, etc.
 # from app.schemas import image as image_schema  # Comentado hasta que se implemente image_schema
 # from app.core.exceptions import NotFoundError, InvalidOperationError
@@ -69,6 +70,21 @@ class ProductService:
     - Aplicación de reglas de negocio del catálogo
     - Preparación para manejo de stock e inventario
     """
+
+    def __init__(self):
+        """Initialize ProductService without database dependency."""
+        self.openai_client = None
+        self.qdrant_client = None
+    
+    def _ensure_clients(self):
+        """Ensure OpenAI and Qdrant clients are initialized when needed."""
+        if self.openai_client is None:
+            self.openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        if self.qdrant_client is None:
+            self.qdrant_client = QdrantClient(
+                host=settings.QDRANT_HOST,
+                port=settings.QDRANT_PORT_GRPC
+            )
 
     # ========================================
     # OPERACIONES DE CONSULTA AVANZADA
@@ -481,141 +497,88 @@ class ProductService:
             raise  # Re-lanzar la excepción para manejo en capas superiores
 
     async def search_products(
-        self,
+        self, 
         db: Session,
-        query_text: str,
-        top_k: int = 10,
-        similarity_threshold: float = 0.6  # Umbral de similitud mínimo
-    ) -> Dict[str, List[models.Product]]:
-        """
-        Realiza una búsqueda de productos usando Qdrant y OpenAI de forma asíncrona.
+        query_text: str, 
+        top_k: int = 10, 
+        category_filter: Optional[int] = None
+    ) -> dict:
+        logger.debug(f"Starting search for query: '{query_text}' with top_k: {top_k}")
         
-        Flujo de la operación:
-        1. Genera un embedding para el texto de consulta usando OpenAI (async).
-        2. Usa ese embedding para buscar los puntos más similares en Qdrant (async).
-        3. Filtra resultados por umbral de similitud para evitar resultados irrelevantes.
-        4. Extrae los SKUs del payload de los puntos encontrados.
-        5. Usa los SKUs para recuperar los detalles completos desde PostgreSQL (sync in thread).
-        6. Divide los resultados en principales y relacionados.
-        
-        Args:
-            db: Sesión de SQLAlchemy
-            query_text: Texto de búsqueda del usuario
-            top_k: Número máximo de resultados a devolver
-            similarity_threshold: Umbral mínimo de similitud (0.0-1.0)
-                - 0.8+: Muy similar (mismo tipo de producto)
-                - 0.6-0.8: Similar (familia de productos relacionados)
-                - 0.4-0.6: Relacionado (categoría similar)
-                - <0.4: No relacionado (filtrado)
-        
-        Returns:
-            Dict con 'main_results' y 'related_results' filtrados por relevancia
-        """
         if not settings.OPENAI_API_KEY:
             logger.warning("OPENAI_API_KEY no configurada para búsqueda semántica")
             return {"main_results": [], "related_results": []}
 
-        qdrant_client = None
-        try:
-            # 1. Conexión a clientes externos (versiones asíncronas)
-            openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-            
-            qdrant_client = AsyncQdrantClient(
-                host=settings.QDRANT_HOST,
-                port=settings.QDRANT_PORT_GRPC,
-                api_key=settings.QDRANT_API_KEY,
-                timeout=20.0 # Timeout generoso para la primera conexión
-            )
+        # Ensure clients are initialized
+        self._ensure_clients()
 
-            # 2. Generar embedding para la consulta del usuario (await)
-            embedding_response = await openai_client.embeddings.create(
-                input=[query_text],
+        try:
+            # Generate embedding for search query
+            response = self.openai_client.embeddings.create(
+                input=query_text,
                 model="text-embedding-3-small"
             )
-            query_embedding = embedding_response.data[0].embedding
-
-            # 3. Realizar la búsqueda en Qdrant (await)
-            search_result = await qdrant_client.search(
-                collection_name="macroferro_products",
+            query_embedding = response.data[0].embedding
+            
+            # Prepare search filter if category is specified
+            search_filter = None
+            if category_filter:
+                search_filter = Filter(
+                    must=[
+                        FieldCondition(
+                            key="category_id",
+                            match=MatchValue(value=category_filter)
+                        )
+                    ]
+                )
+            
+            # Search in Qdrant
+            search_results = self.qdrant_client.search(
+                collection_name=settings.QDRANT_COLLECTION_NAME,
                 query_vector=query_embedding,
-                limit=top_k * 2  # Búsqueda ampliada para filtrar después
+                query_filter=search_filter,
+                limit=top_k
             )
-
-            # 4. Filtrar por umbral de similitud y extraer SKUs
+            
+            # Filter by similarity threshold
+            similarity_threshold = 0.5
             filtered_results = [
-                point for point in search_result 
-                if point.score >= similarity_threshold
+                result for result in search_results 
+                if result.score >= similarity_threshold
             ]
             
             if not filtered_results:
-                logger.info(f"No hay resultados con similitud >= {similarity_threshold} para '{query_text}'")
                 return {"main_results": [], "related_results": []}
             
-            skus_found = [
-                point.payload.get("sku") for point in filtered_results 
-                if point.payload and "sku" in point.payload
-            ]
+            # Extract SKUs from filtered results
+            skus = [result.payload["sku"] for result in filtered_results]
             
-            # Log de calidad de resultados para debugging
-            logger.info(f"Búsqueda '{query_text}': {len(filtered_results)} resultados con similitud >= {similarity_threshold}")
-            for i, point in enumerate(filtered_results[:5]):  # Solo los primeros 5 para log
-                sku = point.payload.get("sku", "N/A")
-                name = point.payload.get("name", "N/A")
-                logger.info(f"  {i+1}. SKU: {sku}, Similitud: {point.score:.3f}, Producto: {name[:50]}...")
-
-            if not skus_found:
-                logger.warning("No se encontraron SKUs válidos en resultados filtrados")
-                return {"main_results": [], "related_results": []}
-
-            # 5. Recuperar detalles desde PostgreSQL (operación síncrona en un hilo)
-            products = await asyncio.to_thread(
-                product_crud.get_products_by_skus, db, skus=skus_found[:top_k]  # Limitar aquí también
-            )
+            # Get full product details from PostgreSQL
+            products = db.query(models.Product).filter(models.Product.sku.in_(skus)).all()
             
-            # 6. Preservar el orden de relevancia de Qdrant
-            product_map = {p.sku: p for p in products}
-            ordered_products = [product_map[sku] for sku in skus_found if sku in product_map]
-
-            # 7. Clasificar resultados por nivel de similitud
-            high_similarity_count = 0
-            main_results = []
-            related_results = []
+            # Create a mapping for quick lookup
+            product_map = {product.sku: product for product in products}
             
-            for i, point in enumerate(filtered_results):
-                if i >= len(ordered_products):
-                    break
-                    
-                product = ordered_products[i]
-                if point.score >= 0.75:  # Alta similitud = resultado principal
-                    main_results.append(product)
-                    high_similarity_count += 1
-                elif point.score >= 0.6:  # Similitud media = resultado relacionado
-                    related_results.append(product)
+            # Sort products by relevance (same order as Qdrant results)
+            sorted_products = []
+            for result in filtered_results:
+                sku = result.payload["sku"]
+                if sku in product_map:
+                    sorted_products.append(product_map[sku])
             
-            # 8. Ajustar distribución si hay pocos resultados principales
-            if len(main_results) == 0 and len(related_results) > 0:
-                # Si no hay resultados de alta similitud, promover los mejores relacionados
-                main_results = related_results[:2]
-                related_results = related_results[2:]
-            elif len(main_results) > 5:
-                # Si hay demasiados principales, mover algunos a relacionados
-                related_results = main_results[3:] + related_results
-                main_results = main_results[:3]
+            # Split into main and related results
+            main_count = min(2, len(sorted_products))
+            main_results = sorted_products[:main_count]
+            related_results = sorted_products[main_count:main_count+2]
             
-            # Limitar números finales
-            main_results = main_results[:3]
-            related_results = related_results[:2]
-
-            logger.info(f"Resultados finales: {len(main_results)} principales, {len(related_results)} relacionados")
-            return {"main_results": main_results, "related_results": related_results}
-
+            return {
+                "main_results": [product_schema.ProductResponse.from_orm(product) for product in main_results],
+                "related_results": [product_schema.ProductResponse.from_orm(product) for product in related_results]
+            }
+            
         except Exception as e:
-            logger.error(f"Error durante la búsqueda semántica: {e}")
-            return {"main_results": [], "related_results": []}
-        finally:
-            # Asegurar que el cliente de Qdrant se cierre siempre
-            if qdrant_client:
-                await qdrant_client.close()
+            logger.error(f"Error in search_products: {str(e)}")
+            raise e
 
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO

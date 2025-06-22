@@ -653,8 +653,7 @@ Ejemplos:
                 search_results = await self.product_service.search_products(
                     db=db,
                     query_text=message_text,
-                    top_k=3,
-                    similarity_threshold=0.7  # Umbral alto para consultas específicas
+                    top_k=3
                 )
                 
                 main_products = search_results.get("main_results", [])
@@ -815,8 +814,7 @@ Responde en español de manera profesional y útil.
         search_results = await self.product_service.search_products(
             db=db,
             query_text=search_query,
-            top_k=8,  # Más productos para mejor selección
-            similarity_threshold=0.5  # Umbral más bajo para búsquedas generales
+            top_k=8  # Más productos para mejor selección
         )
         
         main_products = search_results.get("main_results", [])

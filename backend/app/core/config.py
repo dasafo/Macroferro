@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     QDRANT_PORT_GRPC: int = int(os.getenv("QDRANT_PORT_GRPC", 6333))
     QDRANT_PORT_REST: int = int(os.getenv("QDRANT_PORT_REST", 6334))
     QDRANT_API_KEY: Optional[str] = os.getenv("QDRANT_API_KEY") # Si Qdrant está protegido
+    QDRANT_COLLECTION_NAME: str = os.getenv("QDRANT_COLLECTION_NAME", "macroferro_products")
 
     # OpenAI
     # Clave de API para utilizar los servicios de OpenAI.

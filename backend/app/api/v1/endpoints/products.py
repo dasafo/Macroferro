@@ -35,11 +35,15 @@ Arquitectura implementada:
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import logging
 
 from app.api import deps  # Inyección de dependencias para sesión de BD
 from app.schemas import product as product_schema  # Esquemas Pydantic para productos
 from app.services.product_service import product_service  # Capa de servicios con lógica de negocio de productos
 # from app.core.exceptions import NotFoundError, DuplicateError, InvalidOperationError  # Excepciones futuras
+
+# Configurar logger
+logger = logging.getLogger(__name__)
 
 # Configuración del router para endpoints de productos
 # El prefijo /products será agregado por el router principal
@@ -484,14 +488,16 @@ async def search_products(
     - `main_results`: Los 3 productos más relevantes.
     - `related_results`: Los siguientes 2 productos como sugerencias.
     """
+    logger.info(f"🎯 ENDPOINT: Iniciando búsqueda para '{query.query_text}' con top_k={query.top_k}")
+    
     if not query.query_text.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La consulta de búsqueda no puede estar vacía.")
 
     # El servicio ahora devuelve un diccionario con 'main_results' y 'related_results'
     search_results = await product_service.search_products(
-        db=db,
         query_text=query.query_text,
-        top_k=query.top_k # El servicio internamente tomará los que necesite
+        top_k=query.top_k,
+        db=db  # El servicio internamente tomará los que necesite
     )
 
     if not search_results["main_results"] and not search_results["related_results"]:
