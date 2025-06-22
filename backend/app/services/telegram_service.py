@@ -795,6 +795,38 @@ Responde en español de manera profesional y útil.
             "additional_messages": additional_messages
         }
 
+    async def _validate_search_relevance(self, query: str, result_names: List[str]) -> bool:
+        """Usa IA para validar si los resultados son relevantes para la búsqueda."""
+        if not self.openai_client or not result_names:
+            return True # Asumir relevancia si no hay IA o resultados
+
+        names_list = "\\n - ".join(result_names)
+        prompt = f"""
+        El usuario buscó: "{query}"
+        Los resultados principales de la búsqueda fueron:
+         - {names_list}
+
+        ¿Son estos resultados una coincidencia directa y relevante para la búsqueda del usuario?
+        Por ejemplo, si buscó "destornilladores" y los resultados son "tornillos", la respuesta es NO.
+        Si buscó "herramientas" y el resultado es "taladro", la respuesta es SÍ.
+        
+        Responde únicamente con "SI" o "NO".
+        """
+        try:
+            response = await self.openai_client.chat.completions.create(
+                model="gpt-4o-mini-2024-07-18",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                max_tokens=5,
+                timeout=10.0
+            )
+            answer = response.choices[0].message.content.strip().upper()
+            logger.info(f"Validación de relevancia para '{query}': {answer}")
+            return "SI" in answer
+        except Exception as e:
+            logger.error(f"Error en validación de relevancia con IA: {e}")
+            return True # En caso de error, ser optimista para no bloquear al usuario
+
     async def _handle_product_search(self, db: Session, analysis: Dict, message_text: str) -> List[str]:
         """
         Maneja búsquedas generales de productos con respuesta conversacional.
@@ -820,71 +852,79 @@ Responde en español de manera profesional y útil.
         main_products = search_results.get("main_results", [])
         related_products = search_results.get("related_results", [])
         
-        # Si no hay resultados con umbral bajo, definitivamente no hay nada relevante
-        if not main_products and not related_products:
-            return [
-                f"🔍 Busqué productos relacionados con: *{search_query}*",
-                "❌ No encontré productos que coincidan con esa búsqueda en nuestro catálogo.",
-                "💡 Te sugiero buscar con términos más generales:",
-                "• **Herramientas**: taladros, llaves, destornilladores",
-                "• **Materiales**: tubos, válvulas, conectores",
-                "• **Ferretería**: tornillos, tuercas, arandelas",
-                "• **Construcción**: cemento, pinturas, adhesivos",
-                "🛠️ ¿Hay alguna categoría específica que te interese?"
-            ]
-        
-        # Si hay muy pocos resultados, ser más cauteloso en la presentación
-        total_results = len(main_products) + len(related_products)
-        if total_results <= 2:
-            return [
-                f"🔍 Busqué productos para: *{search_query}*",
-                f"⚠️ Solo encontré {total_results} producto(s) relacionado(s).",
-                "Puede que la búsqueda sea muy específica o el producto no esté en nuestro catálogo.",
-                "💡 ¿Podrías proporcionar más detalles o usar términos más generales?"
-            ]
-        
         messages = []
         
-        # Mensaje inicial más conversacional
-        initial_message = f"🔍 ¡Perfecto! Encontré varios productos para tu búsqueda de *{search_query}*.\n\n✨ Aquí están las mejores opciones:"
-        messages.append(initial_message)
-        
-        # Mostrar productos principales de forma más conversacional
+        is_relevant = True
         if main_products:
-            for i, product in enumerate(main_products, 1):
+            main_product_names = [p.name for p in main_products]
+            is_relevant = await self._validate_search_relevance(search_query, main_product_names)
+
+        # Si los resultados no son relevantes, tratarlos como si fueran "relacionados"
+        if not is_relevant:
+            # Mover todos los productos a la lista de relacionados y limpiar los principales
+            related_products = main_products + related_products
+            main_products = []
+
+        # Comprobar si hay resultados principales. Si no, ajustar el mensaje.
+        if not main_products and related_products:
+            # No hay resultados principales, pero sí relacionados
+            initial_message = f"🤔 No encontré resultados exactos para *{search_query}*, pero esto podría interesarte:"
+            messages.append(initial_message)
+            
+            # Formatear los productos relacionados como si fueran principales
+            for i, product in enumerate(related_products, 1):
                 product_message = f"*{i}. {product.name}*\n"
-                
                 if product.description:
                     desc = product.description[:120] + "..." if len(product.description) > 120 else product.description
                     product_message += f"📝 {desc}\n\n"
-                
                 product_message += f"💰 Precio: *${product.price:,.0f}*\n"
-                
                 if product.category:
                     product_message += f"🏷️ {product.category.name}\n"
-                
                 if hasattr(product, 'brand') and product.brand:
                     product_message += f"🏭 {product.brand}\n"
-                
-                # Agregar especificaciones destacadas si existen
+                messages.append(product_message)
+
+        elif main_products:
+            # Hay resultados principales, proceder como antes.
+            initial_message = f"🔍 ¡Perfecto! Encontré varios productos para tu búsqueda de *{search_query}*.\n\n✨ Aquí están las mejores opciones:"
+            messages.append(initial_message)
+            
+            # Mostrar productos principales
+            for i, product in enumerate(main_products, 1):
+                product_message = f"*{i}. {product.name}*\n"
+                if product.description:
+                    desc = product.description[:120] + "..." if len(product.description) > 120 else product.description
+                    product_message += f"📝 {desc}\n\n"
+                product_message += f"💰 Precio: *${product.price:,.0f}*\n"
+                if product.category:
+                    product_message += f"🏷️ {product.category.name}\n"
+                if hasattr(product, 'brand') and product.brand:
+                    product_message += f"🏭 {product.brand}\n"
                 if product.spec_json:
                     specs_preview = []
-                    for key, value in list(product.spec_json.items())[:2]:  # Solo las primeras 2 specs
+                    for key, value in list(product.spec_json.items())[:2]:
                         specs_preview.append(f"• {key}: {value}")
                     if specs_preview:
                         product_message += f"⚙️ Especificaciones:\n" + "\n".join(specs_preview) + "\n"
-                
                 messages.append(product_message)
+
+            # Mostrar productos relacionados si también existen
+            if related_products:
+                related_message = "\n🔗 *También podrían interesarte:*"
+                for product in related_products:
+                    related_message += f"\n• *{product.name}* - ${product.price:,.0f}"
+                messages.append(related_message)
         
-        # Mostrar productos relacionados más brevemente
-        if related_products:
-            related_message = "🔗 *También podrían interesarte:*\n\n"
-            for product in related_products:
-                related_message += f"• *{product.name}* - ${product.price:,.0f}\n"
-            messages.append(related_message)
-        
+        # Si después de toda la lógica, la lista de mensajes solo tiene el saludo inicial (o está vacía),
+        # significa que no se añadieron productos. Esto previene enviar un mensaje vacío o solo el saludo.
+        if len(messages) <= 1 and not main_products and not related_products:
+             return [
+                f"🔍 Busqué productos para: *{search_query}*",
+                "❌ No encontré ningún producto que coincida con tu búsqueda.\n\n💡 Intenta con otros términos o sé más general."
+            ]
+
         # Mensaje final conversacional
-        follow_up = "💬 ¿Te interesa conocer más detalles de alguno de estos productos?\n\n🔍 Solo menciona el nombre del producto y te daré información técnica completa."
+        follow_up = "💬 ¿Te interesa conocer más detalles de alguno de estos productos?"
         messages.append(follow_up)
         
         return messages
