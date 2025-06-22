@@ -110,8 +110,8 @@ async def process_and_respond_multiple(update_data: dict, bot_service: TelegramB
         
         logger.info(f"Procesando mensaje de chat {chat_id}: {text}")
         
-        # Procesar mensaje con IA
-        response_data = await bot_service.process_message(db, text, chat_id)
+        # Procesar mensaje con IA - corregir parámetros
+        response_data = await bot_service.process_message(db, message)
         
         # Enviar respuesta según el tipo
         if response_data.get("type") == "product_with_image":

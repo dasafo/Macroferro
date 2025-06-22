@@ -452,28 +452,78 @@ class TelegramBotService:
     # PROCESAMIENTO INTELIGENTE DE MENSAJES
     # ========================================
     
-    async def process_message(self, db: Session, message_text: str, chat_id: int) -> Dict[str, Any]:
+    async def process_message(self, db: Session, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Procesa un mensaje del usuario con inteligencia contextual avanzada.
-        
-        El bot ahora puede:
-        1. Detectar referencias a productos específicos (por nombre, marca, característica)
-        2. Consultar detalles exactos de productos en la base de datos
-        3. Proporcionar información técnica específica
-        4. Mantener conversaciones naturales y contextuales
-        5. Manejar múltiples tipos de consulta de forma inteligente
-        6. Enviar fotos de productos cuando estén disponibles
-        
-        El procesamiento se hace con un LLM más potente para mejor comprensión contextual.
-        
-        Returns:
-            Dict con el tipo de respuesta y datos necesarios:
-            - 'type': 'product_with_image' | 'text_messages'
-            - 'messages': Lista de mensajes de texto (para text_messages)
-            - 'product': Objeto producto (para product_with_image)
-            - 'caption': Caption para la imagen (para product_with_image) 
-            - 'additional_messages': Mensajes adicionales (para product_with_image)
+        Procesa un mensaje entrante de Telegram, orquestando análisis de IA,
+        búsqueda de productos y generación de respuestas.
+
+        Este es el método central del servicio que maneja el webhook.
         """
+        message_text = message_data.get("text", "")
+        chat_id = message_data["chat"]["id"]
+
+        # 1. Manejo de comandos directos (sin IA)
+        if message_text.startswith('/'):
+            parts = message_text.split()
+            command = parts[0]
+            args = parts[1:]
+
+            if command == '/start':
+                response_text = (
+                    "🏭 *¡Bienvenido a Macroferro Bot!* 🏭\n\n"
+                    "Soy tu asistente virtual para consultar productos industriales.\n\n"
+                    "*¿Qué puedo hacer?*\n"
+                    "• Buscar productos por nombre o categoría\n"
+                    "• Responder preguntas técnicas sobre productos\n"
+                    "• Gestionar tu carrito de compras\n\n"
+                    "*Comandos del carrito:*\n"
+                    "🛒 `/agregar <SKU> [cantidad]` - Agregar producto al carrito\n"
+                    "📋 `/ver_carrito` - Ver contenido del carrito\n"
+                    "🗑️ `/eliminar <SKU>` - Eliminar producto del carrito\n"
+                    "🧹 `/vaciar_carrito` - Vaciar todo el carrito\n"
+                    "✅ `/finalizar_compra` - Realizar pedido\n\n"
+                    "*Otros comandos:*\n"
+                    "❓ `/help` - Ver todos los comandos\n\n"
+                    "*¡También puedes hacer preguntas como:*\n"
+                    "\"Busco tubos de PVC de 110mm\"\n"
+                    "\"¿Qué herramientas Bahco tienen?\"\n"
+                    "\"Necesito conectores para electricidad\""
+                )
+                return await self.send_message(chat_id, response_text)
+            elif command == '/help':
+                response_text = (
+                    "🤖 *Comandos disponibles en Macroferro Bot:*\n\n"
+                    "*Búsqueda de productos:*\n"
+                    "• Escribe cualquier consulta en lenguaje natural\n"
+                    "• Ejemplo: \"Busco martillos\" o \"¿Tienen tubos de 110mm?\"\n\n"
+                    "*Carrito de compras:*\n"
+                    "🛒 `/agregar <SKU> [cantidad]` - Agregar al carrito\n"
+                    "📋 `/ver_carrito` - Ver mi carrito\n"
+                    "🗑️ `/eliminar <SKU>` - Quitar producto\n"
+                    "🧹 `/vaciar_carrito` - Vaciar carrito\n"
+                    "✅ `/finalizar_compra` - Hacer pedido\n\n"
+                    "*Información:*\n"
+                    "🏠 `/start` - Mensaje de bienvenida\n"
+                    "❓ `/help` - Esta ayuda\n\n"
+                    "💡 *Tip:* También puedes preguntarme directamente sobre productos usando lenguaje natural."
+                )
+                return await self.send_message(chat_id, response_text)
+            elif command == '/agregar':
+                return await self._handle_add_to_cart(chat_id, args, db)
+            elif command == '/ver_carrito':
+                return await self._handle_view_cart(chat_id)
+            elif command == '/eliminar':
+                return await self._handle_remove_from_cart(chat_id, args)
+            elif command == '/vaciar_carrito':
+                return await self._handle_clear_cart(chat_id)
+            elif command == '/finalizar_compra':
+                return await self._handle_checkout(chat_id, message_data)
+
+        # 2. Si no es un comando, proceder con el análisis de IA (código existente)
+        # ... (resto del código de process_message que llama a la IA) ...
+
+        logger.info(f"Analizando mensaje de chat {chat_id}: '{message_text}'")
+
         if not self.openai_client:
             logger.warning("OpenAI no configurado, usando respuesta estática")
             return {
@@ -1249,6 +1299,214 @@ Responde en español de manera concisa pero completa.
         except Exception as e:
             logger.error(f"Error inesperado configurando webhook: {e}")
             raise
+
+    # --- NUEVOS HANDLERS PARA EL CARRITO ---
+
+    def _get_api_client(self) -> httpx.AsyncClient:
+        """Crea un cliente HTTP para comunicarse con la propia API del backend."""
+        # La API se ejecuta en el mismo host, por lo que podemos usar localhost
+        base_url = f"http://localhost:{settings.PORT}{settings.API_V1_STR}"
+        return httpx.AsyncClient(base_url=base_url, timeout=10.0)
+
+    def _format_cart_data(self, cart_data: Dict[str, Any]) -> str:
+        """Formatea los datos del carrito para una respuesta clara en Telegram."""
+        items = cart_data.get("items", {})
+        total_price = cart_data.get("total_price", 0.0)
+
+        if not items:
+            return "🛒 Tu carrito está vacío."
+
+        response_text = "🛒 *Tu Carrito de Compras*\n\n"
+        for sku, item_details in items.items():
+            product_info = json.loads(item_details['product'])
+            product_name = product_info.get("name", "Producto desconocido")
+            quantity = item_details.get("quantity", 0)
+            price = product_info.get("price", 0)
+            subtotal = quantity * price
+            response_text += f"▪️ *{product_name}* ({sku})\n"
+            response_text += f"    `{quantity} x ${price:,.2f} = ${subtotal:,.2f}`\n\n"
+        
+        response_text += f"\n*Total: ${total_price:,.2f}*"
+        return response_text
+
+    async def _handle_add_to_cart(self, chat_id: int, args: List[str], db: Session) -> Dict[str, Any]:
+        """Maneja el comando /agregar."""
+        if not args:
+            return await self.send_message(chat_id, "Uso: /agregar <SKU> [cantidad]")
+        
+        sku = args[0]
+        try:
+            quantity = int(args[1]) if len(args) > 1 else 1
+            if quantity <= 0:
+                return await self.send_message(chat_id, "La cantidad debe ser un número positivo.")
+        except ValueError:
+            return await self.send_message(chat_id, "La cantidad debe ser un número.")
+
+        try:
+            async with self._get_api_client() as client:
+                response = await client.post(
+                    f"/cart/{chat_id}/items",
+                    json={"product_sku": sku, "quantity": quantity}
+                )
+                
+                if response.status_code == 404:
+                    return await self.send_message(chat_id, f"😕 No se encontró ningún producto con el SKU: {sku}")
+                
+                response.raise_for_status()
+                
+                cart_data = response.json()
+                response_text = "✅ *Producto añadido*\n\n"
+                response_text += self._format_cart_data(cart_data)
+
+        except httpx.HTTPError as e:
+            logger.error(f"Error de API al añadir al carrito para chat {chat_id}: {e}")
+            response_text = "Lo siento, ocurrió un error al intentar añadir el producto al carrito."
+        except Exception as e:
+            logger.error(f"Error inesperado al añadir al carrito para chat {chat_id}: {e}")
+            response_text = "Ocurrió un error inesperado. Por favor, intenta de nuevo."
+
+        return await self.send_message(chat_id, response_text)
+
+    async def _handle_view_cart(self, chat_id: int) -> Dict[str, Any]:
+        """Maneja el comando /ver_carrito."""
+        try:
+            async with self._get_api_client() as client:
+                response = await client.get(f"/cart/{chat_id}")
+                response.raise_for_status()
+                cart_data = response.json()
+                response_text = self._format_cart_data(cart_data)
+
+        except httpx.HTTPError as e:
+            logger.error(f"Error de API al ver el carrito para chat {chat_id}: {e}")
+            response_text = "Lo siento, ocurrió un error al recuperar tu carrito."
+        except Exception as e:
+            logger.error(f"Error inesperado al ver el carrito para chat {chat_id}: {e}")
+            response_text = "Ocurrió un error inesperado. Por favor, intenta de nuevo."
+            
+        return await self.send_message(chat_id, response_text)
+
+    async def _handle_remove_from_cart(self, chat_id: int, args: List[str]) -> Dict[str, Any]:
+        """Maneja el comando /eliminar."""
+        if not args:
+            return await self.send_message(chat_id, "Uso: /eliminar <SKU>")
+        
+        sku = args[0]
+        try:
+            async with self._get_api_client() as client:
+                response = await client.delete(f"/cart/{chat_id}/items/{sku}")
+                
+                if response.status_code == 404: # El endpoint devuelve 204 si tiene éxito, no 404 si no encuentra el item.
+                    # Esta lógica puede que no sea necesaria dependiendo de la implementación de la API.
+                    # Asumimos que si no lo encuentra, no hay error.
+                    pass
+
+                response.raise_for_status()
+                response_text = f"🗑️ Producto `{sku}` eliminado del carrito."
+
+        except httpx.HTTPError as e:
+            logger.error(f"Error de API al eliminar del carrito para chat {chat_id}: {e}")
+            response_text = f"Lo siento, ocurrió un error al intentar eliminar el producto `{sku}`."
+        except Exception as e:
+            logger.error(f"Error inesperado al eliminar del carrito para chat {chat_id}: {e}")
+            response_text = "Ocurrió un error inesperado. Por favor, intenta de nuevo."
+
+        return await self.send_message(chat_id, response_text)
+
+    async def _handle_clear_cart(self, chat_id: int) -> Dict[str, Any]:
+        """Maneja el comando /vaciar_carrito."""
+        try:
+            async with self._get_api_client() as client:
+                # Obtenemos el carrito para saber qué items borrar
+                get_response = await client.get(f"/cart/{chat_id}")
+                get_response.raise_for_status()
+                cart_data = get_response.json()
+                items_to_delete = cart_data.get("items", {}).keys()
+
+                if not items_to_delete:
+                    return await self.send_message(chat_id, "Tu carrito ya está vacío.")
+
+                # Borramos cada item
+                for sku in items_to_delete:
+                    await client.delete(f"/cart/{chat_id}/items/{sku}")
+                
+                response_text = "✅ Tu carrito ha sido vaciado."
+
+        except httpx.HTTPError as e:
+            logger.error(f"Error de API al vaciar el carrito para chat {chat_id}: {e}")
+            response_text = "Lo siento, ocurrió un error al intentar vaciar tu carrito."
+        except Exception as e:
+            logger.error(f"Error inesperado al vaciar el carrito para chat {chat_id}: {e}")
+            response_text = "Ocurrió un error inesperado. Por favor, intenta de nuevo."
+
+        return await self.send_message(chat_id, response_text)
+        
+    async def _handle_checkout(self, chat_id: int, message_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Maneja el comando /finalizar_compra."""
+        try:
+            async with self._get_api_client() as client:
+                # 1. Verificar si el carrito está vacío
+                get_response = await client.get(f"/cart/{chat_id}")
+                get_response.raise_for_status()
+                cart_data = get_response.json()
+                if not cart_data.get("items"):
+                    return await self.send_message(chat_id, "Tu carrito está vacío. No puedes finalizar una compra.")
+
+                # 2. Recopilar datos del cliente (versión simplificada)
+                user = message_data.get("from", {})
+                customer_name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+                if not customer_name:
+                    customer_name = "Cliente de Telegram"
+                
+                # En un caso real, pediríamos estos datos al usuario
+                customer_email = f"telegram_{chat_id}@example.com" # Email de ejemplo
+                shipping_address = "Por definir"
+
+                # 3. Construir el payload del pedido
+                order_items = []
+                for sku, item_details in cart_data["items"].items():
+                    product_info = json.loads(item_details['product'])
+                    order_items.append({
+                        "product_sku": sku,
+                        "quantity": item_details["quantity"],
+                        "price": product_info["price"]
+                    })
+
+                order_payload = {
+                    "chat_id": str(chat_id),
+                    "customer_name": customer_name,
+                    "customer_email": customer_email,
+                    "shipping_address": shipping_address,
+                    "items": order_items
+                }
+
+                # 4. Llamar al endpoint de checkout
+                checkout_response = await client.post(f"/cart/{chat_id}/checkout", json=order_payload)
+                checkout_response.raise_for_status()
+                order_data = checkout_response.json()
+
+                # 5. Confirmar al usuario
+                order_id = order_data.get("id")
+                total = order_data.get("total_amount", 0.0)
+                response_text = (
+                    f"🎉 *¡Pedido realizado con éxito!* 🎉\n\n"
+                    f"Gracias por tu compra, *{customer_name}*.\n\n"
+                    f"📄 *Resumen del Pedido*\n"
+                    f"   - *ID del Pedido:* `{order_id}`\n"
+                    f"   - *Total:* `${total:,.2f}`\n\n"
+                    f"Recibirás más detalles en tu correo electrónico (`{customer_email}`)."
+                )
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 400:
+                 response_text = "Tu carrito está vacío, no se puede finalizar la compra."
+            else:
+                logger.error(f"Error de API en checkout para chat {chat_id}: {e}")
+                response_text = "Lo siento, ocurrió un error al procesar tu pedido."
+        except Exception as e:
+            logger.error(f"Error inesperado en checkout para chat {chat_id}: {e}")
+            response_text = "Ocurrió un error inesperado. Por favor, intenta de nuevo."
+
+        return await self.send_message(chat_id, response_text)
 
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO

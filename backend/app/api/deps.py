@@ -17,6 +17,7 @@ Principales ventajas de este enfoque:
 from typing import Generator
 from sqlalchemy.orm import Session
 from app.db.database import SessionLocal # Importamos SessionLocal desde db.database
+from app.core.config import settings
 
 def get_db() -> Generator[Session, None, None]:
     """
@@ -49,6 +50,12 @@ def get_db() -> Generator[Session, None, None]:
         yield db  # Proporciona la sesión al endpoint que la solicite
     finally:
         db.close()  # Garantiza que la sesión se cierre siempre, incluso con excepciones
+
+def get_settings():
+    """
+    Dependencia de FastAPI para obtener el objeto de configuración.
+    """
+    return settings
 
 # ========================================
 # DEPENDENCIAS FUTURAS

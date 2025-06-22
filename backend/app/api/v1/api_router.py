@@ -7,7 +7,12 @@ Router principal para la API versión 1.
 from fastapi import APIRouter
 
 # Importación de routers especializados por dominio de negocio
-from app.api.v1.endpoints import products, categories, telegram  # Routers de endpoints específicos
+from app.api.v1.endpoints import (
+    products, 
+    categories,
+    telegram,
+    cart
+)
 
 # ========================================
 # CONFIGURACIÓN DEL ROUTER PRINCIPAL V1
@@ -43,4 +48,12 @@ api_router_v1.include_router(
     telegram.router,                # Router con endpoints de Telegram
     prefix="/telegram",             # Prefijo: /api/v1/telegram
     tags=["Telegram Bot"]           # Tag para documentación OpenAPI/Swagger
+)
+
+# ROUTER DEL CARRITO
+# Maneja las operaciones del carrito de compras
+api_router_v1.include_router(
+    cart.router,
+    prefix="/cart",
+    tags=["Cart"]
 )

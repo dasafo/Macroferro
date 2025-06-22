@@ -240,7 +240,9 @@ async def main():
         # --- Conexiones ---
         db = await get_db_connection()
         redis_client = Redis.from_url(f"redis://{settings.REDIS_HOST}", decode_responses=False)
-        qdrant_client = AsyncQdrantClient(host=settings.QDRANT_HOST, port=settings.QDRANT_PORT_GRPC, api_key=settings.QDRANT_API_KEY)
+        qdrant_client = AsyncQdrantClient(
+            url=f"http://{settings.QDRANT_HOST}:{settings.QDRANT_PORT_GRPC}"
+        )
         
         await setup_qdrant_collection()
         

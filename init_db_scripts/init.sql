@@ -128,6 +128,42 @@ COMMENT ON COLUMN invoice_items.quantity IS 'Cantidad del producto vendido. Debe
 COMMENT ON COLUMN invoice_items.price_at_purchase IS 'Precio unitario del producto al momento de la compra.';
 COMMENT ON CONSTRAINT fk_product_item ON invoice_items IS 'Restringe el borrado de un producto si está referenciado en alguna factura.';
 
+-- Tabla de Órdenes (Carrito convertido a pedido)
+CREATE TABLE IF NOT EXISTS orders (
+    id SERIAL PRIMARY KEY,
+    chat_id VARCHAR(255) NOT NULL,
+    customer_name VARCHAR(255) NOT NULL,
+    customer_email VARCHAR(255) NOT NULL,
+    shipping_address TEXT NOT NULL,
+    total_amount NUMERIC(10, 2) NOT NULL CHECK (total_amount >= 0),
+    status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE orders IS 'Órdenes generadas desde el carrito de compras del bot de Telegram.';
+COMMENT ON COLUMN orders.chat_id IS 'ID del chat de Telegram del usuario que realizó la orden.';
+COMMENT ON COLUMN orders.status IS 'Estado de la orden: pending, confirmed, shipped, delivered, cancelled.';
+
+-- Trigger para actualizar updated_at en orders
+CREATE TRIGGER update_orders_updated_at
+BEFORE UPDATE ON orders
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+-- Tabla de Items de Orden
+CREATE TABLE IF NOT EXISTS order_items (
+    id SERIAL PRIMARY KEY,
+    order_id INT NOT NULL,
+    product_sku VARCHAR(50) NOT NULL,
+    quantity INT NOT NULL CHECK (quantity > 0),
+    price NUMERIC(10, 2) NOT NULL CHECK (price >= 0),
+    CONSTRAINT fk_order FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    CONSTRAINT fk_product_order FOREIGN KEY(product_sku) REFERENCES products(sku) ON DELETE RESTRICT
+);
+COMMENT ON TABLE order_items IS 'Detalle de los productos incluidos en cada orden.';
+COMMENT ON COLUMN order_items.quantity IS 'Cantidad del producto en la orden. Debe ser mayor que cero.';
+COMMENT ON COLUMN order_items.price IS 'Precio unitario del producto al momento de la orden.';
+
 --------------------------------------------------------------------------------
 -- CARGA DE DATOS DESDE ARCHIVOS CSV                                          --
 -- Asegúrate de que los archivos CSV estén en /docker-entrypoint-initdb.d/csv_data/ --

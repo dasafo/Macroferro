@@ -1,18 +1,19 @@
 # backend/app/db/models/order.py
 from sqlalchemy import (
-    Column, Integer, String, DateTime, Numeric, Enum as SQLAlchemyEnum, ForeignKey, Text
+    Column, Integer, String, DateTime, Numeric, ForeignKey, Text
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-import enum
+from sqlalchemy.dialects.postgresql import ENUM
 
-from app.db.base_class import Base
+from app.db.database import Base
 
-class OrderStatus(enum.Enum):
-    PENDING = "pending"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
-    SHIPPED = "shipped"
+# Usar un enum de PostgreSQL explícito para evitar problemas de nombre
+order_status_enum = ENUM(
+    'pending', 'completed', 'cancelled', 'shipped',
+    name='order_status_enum',
+    create_type=False
+)
 
 class Order(Base):
     __tablename__ = "orders"
@@ -27,7 +28,7 @@ class Order(Base):
 
     # Detalles del pedido
     total_amount = Column(Numeric(10, 2), nullable=False)
-    status = Column(SQLAlchemyEnum(OrderStatus), nullable=False, default=OrderStatus.PENDING)
+    status = Column(String, nullable=False, default='pending')
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -37,7 +38,7 @@ class Order(Base):
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<Order(id={self.id}, chat_id='{self.chat_id}', status='{self.status.value}')>"
+        return f"<Order(id={self.id}, chat_id='{self.chat_id}', status='{self.status}')>"
 
 
 class OrderItem(Base):

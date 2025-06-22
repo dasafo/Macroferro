@@ -2,8 +2,16 @@
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 from datetime import datetime
+import enum
 
-from .product import Product # Importar el esquema del producto para anidarlo
+from .product import ProductResponse # Importar el esquema de respuesta del producto
+
+# Enum para el estado del pedido, debe coincidir con el del modelo
+class OrderStatus(str, enum.Enum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    SHIPPED = "shipped"
 
 # Esquema para los items del pedido
 class OrderItemBase(BaseModel):
@@ -17,28 +25,29 @@ class OrderItemCreate(OrderItemBase):
 class OrderItem(OrderItemBase):
     id: int
     order_id: int
-    product: Optional[Product] = None # Anidar información del producto
+    product: Optional[ProductResponse] = None # Anidar información del producto
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Esquema para la orden de compra
 class OrderBase(BaseModel):
+    chat_id: str
     customer_name: str
     customer_email: EmailStr
     shipping_address: Optional[str] = None
+    status: OrderStatus = OrderStatus.PENDING
 
 class OrderCreate(OrderBase):
     items: List[OrderItemCreate]
 
 class Order(OrderBase):
     id: int
-    chat_id: str
     total_amount: float
-    status: str
+    status: OrderStatus
     created_at: datetime
     updated_at: Optional[datetime] = None
     items: List[OrderItem] = []
 
     class Config:
-        orm_mode = True 
+        from_attributes = True 
