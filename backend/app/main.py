@@ -128,9 +128,12 @@ async def startup_event():
         # Solo configurar webhook si está definida la URL en las variables de entorno
         if settings.telegram_webhook_url:
             telegram_service = TelegramBotService()
-            webhook_result = await telegram_service.set_webhook(settings.telegram_webhook_url)
+            webhook_result = await telegram_service.set_webhook(
+                webhook_url=settings.telegram_webhook_url,
+                secret_token=settings.telegram_webhook_secret
+            )
             
-            if webhook_result.get("success", False):
+            if webhook_result.get("ok", False):
                 print(f"✅ Webhook de Telegram configurado: {settings.telegram_webhook_url}")
             else:
                 print(f"⚠️  Error al configurar webhook: {webhook_result}")
