@@ -30,7 +30,7 @@ Diferencias con la capa CRUD:
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
-from app.db import models
+from app.db.models.category_model import Category
 from app.crud import category_crud
 from app.schemas import category as category_schema
 # Podríamos definir excepciones personalizadas aquí o en un módulo `exceptions.py`
@@ -55,7 +55,7 @@ class CategoryService:
     # OPERACIONES DE CONSULTA
     # ========================================
 
-    def get_category_by_id(self, db: Session, category_id: int) -> Optional[models.Category]:
+    def get_category_by_id(self, db: Session, category_id: int) -> Optional[Category]:
         """
         Obtiene una categoría por su ID con validaciones de negocio.
         
@@ -88,7 +88,7 @@ class CategoryService:
         
         return category
 
-    def get_all_categories(self, db: Session, skip: int = 0, limit: int = 100) -> List[models.Category]:
+    def get_all_categories(self, db: Session, skip: int = 0, limit: int = 100) -> List[Category]:
         """
         Obtiene todas las categorías con paginación y validaciones de negocio.
         
@@ -117,7 +117,7 @@ class CategoryService:
             
         return category_crud.get_categories(db, skip=skip, limit=limit)
 
-    def get_main_categories(self, db: Session, skip: int = 0, limit: int = 100) -> List[models.Category]:
+    def get_main_categories(self, db: Session, skip: int = 0, limit: int = 100) -> List[Category]:
         """
         Obtiene las categorías principales (nivel raíz) para navegación.
         
@@ -145,7 +145,7 @@ class CategoryService:
         """
         return category_crud.get_root_categories(db, skip=skip, limit=limit)
     
-    def get_subcategories(self, db: Session, parent_id: int, skip: int = 0, limit: int = 100) -> List[models.Category]:
+    def get_subcategories(self, db: Session, parent_id: int, skip: int = 0, limit: int = 100) -> List[Category]:
         """
         Obtiene las subcategorías de una categoría padre específica.
         
@@ -182,7 +182,7 @@ class CategoryService:
     # OPERACIONES DE ESCRITURA CON LÓGICA DE NEGOCIO
     # ========================================
 
-    def create_new_category(self, db: Session, category_in: category_schema.CategoryCreate) -> models.Category:
+    def create_new_category(self, db: Session, category_in: category_schema.CategoryCreate) -> Category:
         """
         Crea una nueva categoría con validaciones completas de negocio.
         
@@ -236,7 +236,7 @@ class CategoryService:
         
         return category_crud.create_category(db=db, category=category_in)
 
-    def update_existing_category(self, db: Session, category_id: int, category_in: category_schema.CategoryUpdate) -> Optional[models.Category]:
+    def update_existing_category(self, db: Session, category_id: int, category_in: category_schema.CategoryUpdate) -> Optional[Category]:
         """
         Actualiza una categoría existente con validaciones complejas de negocio.
         
@@ -268,49 +268,47 @@ class CategoryService:
             - Cambiar nombre puede afectar URLs y navegación
             - Se requiere validación de ciclos para jerarquías complejas
         """
-        # VALIDACIÓN PREVIA: Verificar que la categoría existe
-        category = category_crud.get_category(db, category_id=category_id)
-        if not category:
-            # Para producción:
-            # raise NotFoundError(f"Category with id {category_id} not found for update")
+        # VALIDACIÓN 1: Verificar existencia de la categoría
+        db_category = self.get_category_by_id(db, category_id)
+        if not db_category:
             return None
+            # En producción, podría ser mejor lanzar NotFoundError aquí
 
-        # VALIDACIÓN DE DUPLICADOS: Solo si se cambian campos relevantes
-        if category_in.name is not None or category_in.parent_id is not None:
-            # Construir el estado final combinando actual + cambios
-            name_to_check = category_in.name if category_in.name is not None else category.name
-            parent_id_to_check = category_in.parent_id if category_in.parent_id is not None else category.parent_id
-            
-            # Solo validar si realmente hay cambio en la combinación nombre+padre
-            if not (name_to_check == category.name and parent_id_to_check == category.parent_id):
-                existing_category = category_crud.get_category_by_name_and_parent(
-                    db, name=name_to_check, parent_id=parent_id_to_check
-                )
-                # Excluir la categoría actual de la verificación de duplicados
-                if existing_category and existing_category.category_id != category_id:
-                    # Para producción:
-                    # raise DuplicateError(f"Another category with name '{name_to_check}' already exists under the specified parent.")
-                    pass
+        # Preparar datos de actualización (solo campos proporcionados)
+        update_data = category_in.model_dump(exclude_unset=True)
 
-        # VALIDACIÓN DE PADRE: Verificar que el nuevo padre existe
-        if category_in.parent_id is not None and category_in.parent_id != category.parent_id:
-            # Manejar casos especiales: None, 0, o valores que representen "sin padre"
-            if category_in.parent_id != 0:  # Asumiendo 0 como valor especial para "sin padre"
-                 new_parent = category_crud.get_category(db, category_id=category_in.parent_id)
-                 if not new_parent:
-                    # Para producción:
-                    # raise NotFoundError(f"New parent category with id {category_in.parent_id} not found.")
-                    pass
+        # VALIDACIÓN 2: Evitar duplicados si se cambia el nombre
+        if 'name' in update_data:
+            parent_id = update_data.get('parent_id', db_category.parent_id)
+            existing = category_crud.get_category_by_name_and_parent(
+                db, name=update_data['name'], parent_id=parent_id
+            )
+            if existing and existing.category_id != category_id:
+                # raise DuplicateError(f"Category name '{update_data['name']}' already exists under the target parent.")
+                return None # Simplificado para Fase 1
 
-        # VALIDACIÓN FUTURA: Prevenir ciclos en la jerarquía
-        # TODO: Implementar verificación de que category_in.parent_id no cree un ciclo
-        # donde la categoría actual se convierta en ancestro de sí misma
+        # VALIDACIÓN 3: Evitar ciclos en la jerarquía
+        if 'parent_id' in update_data:
+            new_parent_id = update_data['parent_id']
+            if new_parent_id is not None:
+                # No se puede ser padre de sí mismo
+                if new_parent_id == category_id:
+                    # raise ValidationError("A category cannot be its own parent.")
+                    return None
+                
+                # Verificar que el nuevo padre no sea un descendiente de esta categoría
+                descendant = self.get_category_by_id(db, new_parent_id)
+                while descendant and descendant.parent_id is not None:
+                    if descendant.parent_id == category_id:
+                        # raise ValidationError("Cannot move a category under one of its descendants.")
+                        return None
+                    descendant = self.get_category_by_id(db, descendant.parent_id)
 
-        return category_crud.update_category(db=db, category_id=category_id, category_update=category_in)
+        return category_crud.update_category(db, category_id, category_in)
 
-    def delete_existing_category(self, db: Session, category_id: int) -> Optional[models.Category]:
+    def delete_existing_category(self, db: Session, category_id: int) -> Optional[Category]:
         """
-        Elimina una categoría con validaciones y manejo de efectos colaterales.
+        Elimina una categoría con validaciones de integridad de negocio.
         
         Esta operación es crítica porque puede afectar la integridad del catálogo
         al dejar productos sin categoría y convertir subcategorías en categorías raíz.
@@ -343,34 +341,35 @@ class CategoryService:
             - Reasignación: Mover productos y subcategorías antes de eliminar
             - Cascada controlada: Eliminar subcategorías vacías también
         """
-        # VALIDACIÓN PREVIA: Verificar que la categoría existe
-        category_to_delete = category_crud.get_category(db, category_id=category_id)
-        if not category_to_delete:
-            # Para producción:
-            # raise NotFoundError(f"Category with id {category_id} not found for deletion")
+        # VALIDACIÓN 1: Verificar que la categoría exista
+        category = self.get_category_by_id(db, category_id)
+        if not category:
             return None
+            # raise NotFoundError(f"Category with id {category_id} not found.")
 
-        # VALIDACIONES DE NEGOCIO FUTURAS:
+        # VALIDACIÓN 2 (Crítica): Verificar si la categoría tiene productos asociados
+        # La FK en 'products' tiene ON DELETE SET NULL, lo que significa que
+        # si eliminamos una categoría, los productos asociados pasarán a tener
+        # category_id = NULL. Esto podría ser indeseado.
         
-        # 1. Verificar productos asociados
-        # products_count = db.query(models.Product).filter(models.Product.category_id == category_id).count()
-        # if products_count > 0:
-        #     logging.warning(f"Deleting category {category_id} will orphan {products_count} products")
-        
-        # 2. Verificar subcategorías
-        # subcategories_count = db.query(models.Category).filter(models.Category.parent_id == category_id).count()
-        # if subcategories_count > 0:
-        #     logging.warning(f"Deleting category {category_id} will orphan {subcategories_count} subcategories")
-        
-        # 3. Requerir confirmación para operaciones de alto impacto
-        # if products_count > 100 or subcategories_count > 10:
-        #     raise BusinessLogicError("High-impact deletion requires explicit confirmation")
+        # Opción A (más segura): Prevenir eliminación si hay productos
+        if category.products:
+            # raise IntegrityError("Cannot delete category with associated products. Reassign products first.")
+            # Para Fase 1, se permite la eliminación y los productos quedan sin categoría.
+            pass
 
-        # Las foreign key constraints manejarán automáticamente:
-        # - products.category_id -> NULL (ON DELETE SET NULL)
-        # - categories.parent_id -> NULL (ON DELETE SET NULL)
+        # Opción B (alternativa): Reasignar productos a categoría padre o a una "Sin Categoría"
+        # if category.products and category.parent:
+        #     for product in category.products:
+        #         product.category_id = category.parent_id
+        #     db.commit()
+
+        # VALIDACIÓN 3 (Opcional): Manejar subcategorías
+        # El constraint de FK maneja esto (ON DELETE SET NULL), así que
+        # las subcategorías pasarán a ser categorías raíz.
+        # Se podría implementar lógica para moverlas al padre de la categoría eliminada.
         
-        return category_crud.delete_category(db=db, category_id=category_id)
+        return category_crud.delete_category(db, category_id=category_id)
 
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO

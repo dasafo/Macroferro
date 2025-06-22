@@ -22,14 +22,14 @@ Patrones implementados:
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 
-from app.db import models # Importamos los modelos SQLAlchemy
+from app.db.models.category_model import Category
 from app.schemas import category as category_schema # Importamos los schemas Pydantic para categorías
 
 # ========================================
 # OPERACIONES DE LECTURA (READ)
 # ========================================
 
-def get_category(db: Session, category_id: int) -> Optional[models.Category]:
+def get_category(db: Session, category_id: int) -> Optional[Category]:
     """
     Obtiene una categoría por su ID.
     
@@ -48,10 +48,10 @@ def get_category(db: Session, category_id: int) -> Optional[models.Category]:
         if category:
             print(f"Categoría encontrada: {category.name}")
     """
-    return db.query(models.Category).filter(models.Category.category_id == category_id).first()
+    return db.query(Category).filter(Category.category_id == category_id).first()
 
 
-def get_category_by_name_and_parent(db: Session, name: str, parent_id: Optional[int]) -> Optional[models.Category]:
+def get_category_by_name_and_parent(db: Session, name: str, parent_id: Optional[int]) -> Optional[Category]:
     """
     Obtiene una categoría por su nombre y parent_id.
     
@@ -74,17 +74,17 @@ def get_category_by_name_and_parent(db: Session, name: str, parent_id: Optional[
         # Verificar si "Eléctricas" ya existe bajo la categoría padre ID 1
         existing = get_category_by_name_and_parent(db, "Eléctricas", 1)
     """
-    query = db.query(models.Category).filter(models.Category.name == name)
+    query = db.query(Category).filter(Category.name == name)
     
     # Manejo especial para categorías raíz (parent_id = None)
     if parent_id is None:
-        query = query.filter(models.Category.parent_id.is_(None))
+        query = query.filter(Category.parent_id.is_(None))
     else:
-        query = query.filter(models.Category.parent_id == parent_id)
+        query = query.filter(Category.parent_id == parent_id)
     return query.first()
 
 
-def get_categories(db: Session, skip: int = 0, limit: int = 100) -> List[models.Category]:
+def get_categories(db: Session, skip: int = 0, limit: int = 100) -> List[Category]:
     """
     Obtiene una lista paginada de todas las categorías.
     
@@ -105,10 +105,10 @@ def get_categories(db: Session, skip: int = 0, limit: int = 100) -> List[models.
         - El orden por defecto es por ID, considerar ordenar por name si es necesario
         - Para UI, combinar con get_total_categories() para mostrar paginación completa
     """
-    return db.query(models.Category).offset(skip).limit(limit).all()
+    return db.query(Category).offset(skip).limit(limit).all()
 
 
-def get_root_categories(db: Session, skip: int = 0, limit: int = 100) -> List[models.Category]:
+def get_root_categories(db: Session, skip: int = 0, limit: int = 100) -> List[Category]:
     """
     Obtiene todas las categorías raíz (nivel superior de la jerarquía).
     
@@ -134,10 +134,10 @@ def get_root_categories(db: Session, skip: int = 0, limit: int = 100) -> List[mo
         for cat in root_cats:
             print(f"Categoría principal: {cat.name}")
     """
-    return db.query(models.Category).filter(models.Category.parent_id.is_(None)).offset(skip).limit(limit).all()
+    return db.query(Category).filter(Category.parent_id.is_(None)).offset(skip).limit(limit).all()
 
 
-def get_child_categories(db: Session, parent_id: int, skip: int = 0, limit: int = 100) -> List[models.Category]:
+def get_child_categories(db: Session, parent_id: int, skip: int = 0, limit: int = 100) -> List[Category]:
     """
     Obtiene las subcategorías directas de una categoría padre.
     
@@ -165,14 +165,14 @@ def get_child_categories(db: Session, parent_id: int, skip: int = 0, limit: int 
         - Implementar con múltiples queries
         - Considerar desnormalización para jerarquías muy profundas
     """
-    return db.query(models.Category).filter(models.Category.parent_id == parent_id).offset(skip).limit(limit).all()
+    return db.query(Category).filter(Category.parent_id == parent_id).offset(skip).limit(limit).all()
 
 
 # ========================================
 # OPERACIONES DE ESCRITURA (CREATE, UPDATE, DELETE)
 # ========================================
 
-def create_category(db: Session, category: category_schema.CategoryCreate) -> models.Category:
+def create_category(db: Session, category: category_schema.CategoryCreate) -> Category:
     """
     Crea una nueva categoría en la base de datos.
     
@@ -203,7 +203,7 @@ def create_category(db: Session, category: category_schema.CategoryCreate) -> mo
         new_category = CategoryCreate(category_id=10, name="Nueva Categoría", parent_id=None)
         created = create_category(db, new_category)
     """
-    db_category = models.Category(
+    db_category = Category(
         category_id=category.category_id,  # ID específico del CSV
         name=category.name, 
         parent_id=category.parent_id
@@ -214,7 +214,7 @@ def create_category(db: Session, category: category_schema.CategoryCreate) -> mo
     return db_category
 
 
-def update_category(db: Session, category_id: int, category_update: category_schema.CategoryUpdate) -> Optional[models.Category]:
+def update_category(db: Session, category_id: int, category_update: category_schema.CategoryUpdate) -> Optional[Category]:
     """
     Actualiza una categoría existente.
     
@@ -251,7 +251,7 @@ def update_category(db: Session, category_id: int, category_update: category_sch
         return None
     
     # Solo actualiza campos que fueron proporcionados (exclude_unset=True)
-    update_data = category_update.dict(exclude_unset=True)
+    update_data = category_update.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(db_category, key, value)
     
@@ -261,7 +261,7 @@ def update_category(db: Session, category_id: int, category_update: category_sch
     return db_category
 
 
-def delete_category(db: Session, category_id: int) -> Optional[models.Category]:
+def delete_category(db: Session, category_id: int) -> Optional[Category]:
     """
     Elimina una categoría de la base de datos.
     
@@ -302,21 +302,10 @@ def delete_category(db: Session, category_id: int) -> Optional[models.Category]:
             
             deleted = delete_category(db, category_id)
     """
-    db_category = get_category(db, category_id=category_id)
-    if not db_category:
-        return None
-        
-    # Las foreign key constraints manejarán automáticamente:
-    # - productos.category_id -> NULL (ON DELETE SET NULL)
-    # - categorias.parent_id -> NULL (ON DELETE SET NULL)
-    # 
-    # Si se necesita un comportamiento diferente, implementar aquí:
-    # - Reasignar productos a categoría padre
-    # - Promover subcategorías al nivel del padre
-    # - Prevenir eliminación si hay dependencias
-
-    db.delete(db_category)
-    db.commit()
+    db_category = get_category(db, category_id)
+    if db_category:
+        db.delete(db_category)
+        db.commit()
     return db_category
 
 # ========================================
@@ -335,3 +324,14 @@ def delete_category(db: Session, category_id: int) -> Optional[models.Category]:
 # def count_products_in_category(db: Session, category_id: int, include_subcategories: bool = False) -> int:
 #     """Cuenta productos en una categoría, opcionalmente incluyendo subcategorías."""
 #     pass
+
+def get_total_categories(db: Session) -> int:
+    """
+    Obtiene el número total de categorías en la base de datos.
+    
+    Es una función auxiliar útil para calcular la paginación en el frontend.
+    
+    Returns:
+        Número total de categorías (int)
+    """
+    return db.query(Category).count()

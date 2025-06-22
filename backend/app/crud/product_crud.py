@@ -24,14 +24,14 @@ Estrategias de optimización implementadas:
 from sqlalchemy.orm import Session, joinedload, subqueryload,selectinload
 from typing import List, Optional, Dict, Any
 
-from app.db import models # Modelos SQLAlchemy
+from app.db.models.product_model import Product, ProductImage, Image
 from app.schemas import product as product_schema # Schemas Pydantic para productos
 
 # ========================================
 # OPERACIONES DE LECTURA (READ)
 # ========================================
 
-def get_product_by_sku(db: Session, sku: str) -> Optional[models.Product]:
+def get_product_by_sku(db: Session, sku: str) -> Optional[Product]:
     """
     Obtiene un producto por su SKU, con relaciones precargadas.
     
@@ -59,12 +59,12 @@ def get_product_by_sku(db: Session, sku: str) -> Optional[models.Product]:
             print(f"Imágenes: {len(product.images_association)}")
     """
     return (
-        db.query(models.Product)
+        db.query(Product)
         .options(
-            selectinload(models.Product.category),  # Carga eficiente de la categoría
-            selectinload(models.Product.images_association).selectinload(models.ProductImage.image)  # Carga eficiente de imágenes
+            selectinload(Product.category),  # Carga eficiente de la categoría
+            selectinload(Product.images_association).selectinload(ProductImage.image)  # Carga eficiente de imágenes
         )
-        .filter(models.Product.sku == sku)
+        .filter(Product.sku == sku)
         .first()
     )
 
@@ -78,7 +78,7 @@ def get_products(
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
     name_like: Optional[str] = None
-) -> List[models.Product]:
+) -> List[Product]:
     """
     Obtiene una lista filtrada y paginada de productos.
     
@@ -125,27 +125,27 @@ def get_products(
             limit=20
         )
     """
-    query = db.query(models.Product).options(
-        selectinload(models.Product.category),  # Precarga categoría
-        selectinload(models.Product.images_association).selectinload(models.ProductImage.image)  # Precarga imágenes
+    query = db.query(Product).options(
+        selectinload(Product.category),  # Precarga categoría
+        selectinload(Product.images_association).selectinload(ProductImage.image)  # Precarga imágenes
     )
 
     # Aplicar filtros solo si se proporcionan (filtros opcionales y combinables)
     if category_id is not None:
-        query = query.filter(models.Product.category_id == category_id)
+        query = query.filter(Product.category_id == category_id)
     if brand:
-        query = query.filter(models.Product.brand.ilike(f"%{brand}%"))  # Búsqueda insensible a mayúsculas/minúsculas
+        query = query.filter(Product.brand.ilike(f"%{brand}%"))  # Búsqueda insensible a mayúsculas/minúsculas
     if min_price is not None:
-        query = query.filter(models.Product.price >= min_price)
+        query = query.filter(Product.price >= min_price)
     if max_price is not None:
-        query = query.filter(models.Product.price <= max_price)
+        query = query.filter(Product.price <= max_price)
     if name_like:
-        query = query.filter(models.Product.name.ilike(f"%{name_like}%"))
+        query = query.filter(Product.name.ilike(f"%{name_like}%"))
         
     return query.offset(skip).limit(limit).all()
 
 
-def get_products_by_skus(db: Session, skus: List[str]) -> List[models.Product]:
+def get_products_by_skus(db: Session, skus: List[str]) -> List[Product]:
     """
     Obtiene una lista de productos a partir de una lista de SKUs.
 
@@ -168,12 +168,12 @@ def get_products_by_skus(db: Session, skus: List[str]) -> List[models.Product]:
         return []
     
     return (
-        db.query(models.Product)
+        db.query(Product)
         .options(
-            selectinload(models.Product.category),
-            selectinload(models.Product.images_association).selectinload(models.ProductImage.image)
+            selectinload(Product.category),
+            selectinload(Product.images_association).selectinload(ProductImage.image)
         )
-        .filter(models.Product.sku.in_(skus))
+        .filter(Product.sku.in_(skus))
         .all()
     )
 
@@ -182,9 +182,13 @@ def get_products_by_skus(db: Session, skus: List[str]) -> List[models.Product]:
 # OPERACIONES DE ESCRITURA (CREATE, UPDATE, DELETE)
 # ========================================
 
-def create_product(db: Session, product: product_schema.ProductCreate) -> models.Product:
+def create_product(
+    db: Session, 
+    product: product_schema.ProductCreate, 
+    image_urls: Optional[List[str]] = None
+) -> Product:
     """
-    Crea un nuevo producto en la base de datos.
+    Crea un nuevo producto en la base de datos, con la opción de asociar imágenes.
     
     Esta función maneja la creación de productos con validación previa
     de los datos a través de esquemas Pydantic. El campo spec_json
@@ -193,6 +197,7 @@ def create_product(db: Session, product: product_schema.ProductCreate) -> models
     Args:
         db: Sesión de SQLAlchemy
         product: Esquema Pydantic con los datos validados del producto
+        image_urls: Lista de URLs de imágenes asociadas al producto
         
     Returns:
         Objeto Product recién creado y persistido
@@ -220,7 +225,7 @@ def create_product(db: Session, product: product_schema.ProductCreate) -> models
         created = create_product(db, new_product)
     """
     # spec_json ya debería ser un dict gracias al validador de Pydantic
-    db_product = models.Product(
+    db_product = Product(
         sku=product.sku,
         name=product.name,
         description=product.description,
@@ -230,12 +235,28 @@ def create_product(db: Session, product: product_schema.ProductCreate) -> models
         spec_json=product.spec_json  # PostgreSQL JSONB maneja la serialización automáticamente
     )
     db.add(db_product)
-    db.commit()  # Persiste en la base de datos
-    db.refresh(db_product)  # Recarga el objeto con datos actualizados (ej: timestamps)
+    
+    # Procesar y asociar imágenes si se proporcionan
+    if image_urls:
+        for url in image_urls:
+            # Simplificado: Asume que las imágenes ya existen o se crean aquí.
+            # En un sistema real, aquí iría la lógica para get_or_create_image.
+            image = db.query(Image).filter(Image.url == url).first()
+            if not image:
+                image = Image(url=url, alt_text=f"Imagen de {product.name}")
+                db.add(image)
+                db.flush() # Para obtener el image_id
+
+            # Crear la asociación
+            association = ProductImage(product_sku=product.sku, image_id=image.image_id)
+            db.add(association)
+
+    db.commit()
+    db.refresh(db_product)
     return db_product
 
 
-def update_product(db: Session, sku: str, product_update: product_schema.ProductUpdate) -> Optional[models.Product]:
+def update_product(db: Session, sku: str, product_update: product_schema.ProductUpdate) -> Optional[Product]:
     """
     Actualiza un producto existente.
     
@@ -274,23 +295,25 @@ def update_product(db: Session, sku: str, product_update: product_schema.Product
         if updated:
             print(f"Producto actualizado: {updated.name} - ${updated.price}")
     """
-    db_product = db.query(models.Product).filter(models.Product.sku == sku).first()
+    db_product = get_product_by_sku(db, sku)
     if not db_product:
         return None
-    
-    # Solo actualiza campos proporcionados (exclude_unset=True evita sobrescribir con None)
-    update_data = product_update.dict(exclude_unset=True)
-    
+
+    # Obtener los datos del schema Pydantic como un diccionario
+    update_data = product_update.model_dump(exclude_unset=True)
+
+    # Actualizar los campos del objeto SQLAlchemy
     for key, value in update_data.items():
         setattr(db_product, key, value)
-    
-    db.add(db_product)  # Marca como modificado
-    db.commit()  # Persiste cambios
-    db.refresh(db_product)  # Recarga datos actualizados
+
+    db.add(db_product)
+    db.commit()
+    db.refresh(db_product)
+
     return db_product
 
 
-def delete_product(db: Session, sku: str) -> Optional[models.Product]:
+def delete_product(db: Session, sku: str) -> Optional[Product]:
     """
     Elimina un producto de la base de datos.
     
@@ -335,19 +358,10 @@ def delete_product(db: Session, sku: str) -> Optional[models.Product]:
         except IntegrityError:
             print("No se puede eliminar: producto presente en facturas")
     """
-    db_product = db.query(models.Product).filter(models.Product.sku == sku).first()
-    if not db_product:
-        return None
-    
-    # Las foreign key constraints manejarán automáticamente:
-    # - product_images: CASCADE (se eliminan las asociaciones)
-    # - stock: CASCADE (se elimina el stock de todos los almacenes)
-    # - invoice_items: RESTRICT (previene eliminación si está en facturas)
-    # 
-    # La aplicación debe manejar IntegrityError si el producto está en facturas
-
-    db.delete(db_product)
-    db.commit()
+    db_product = get_product_by_sku(db, sku)
+    if db_product:
+        db.delete(db_product)
+        db.commit()
     return db_product
 
 
@@ -355,7 +369,7 @@ def delete_product(db: Session, sku: str) -> Optional[models.Product]:
 # GESTIÓN DE ASOCIACIONES PRODUCTO-IMAGEN
 # ========================================
 
-def add_image_to_product(db: Session, sku: str, image_id: int) -> Optional[models.ProductImage]:
+def add_image_to_product(db: Session, sku: str, image_id: int) -> Optional[ProductImage]:
     """
     Asocia una imagen existente a un producto.
     
@@ -393,23 +407,23 @@ def add_image_to_product(db: Session, sku: str, image_id: int) -> Optional[model
             print("Imagen asociada correctamente")
     """
     # Verificar que el producto y la imagen existan
-    product = db.query(models.Product).filter(models.Product.sku == sku).first()
-    image = db.query(models.Image).filter(models.Image.image_id == image_id).first()
+    product = db.query(Product).filter(Product.sku == sku).first()
+    image = db.query(Image).filter(Image.image_id == image_id).first()
 
-    if not product or not image:
-        return None  # O lanzar una excepción específica
+    if not (product and image):
+        return None
 
-    # Verificar si la asociación ya existe para evitar duplicados
-    existing_association = db.query(models.ProductImage).filter_by(sku=sku, image_id=image_id).first()
+    # Verificar si la asociación ya existe
+    existing_association = db.query(ProductImage).filter_by(product_sku=sku, image_id=image_id).first()
     if existing_association:
-        return existing_association  # Devuelve la asociación existente (idempotente)
+        return existing_association
 
-    # Crear nueva asociación
-    db_product_image = models.ProductImage(sku=sku, image_id=image_id)
-    db.add(db_product_image)
+    # Crear la nueva asociación
+    db_association = ProductImage(product_sku=sku, image_id=image_id)
+    db.add(db_association)
     db.commit()
-    db.refresh(db_product_image)
-    return db_product_image
+    db.refresh(db_association)
+    return db_association
 
 
 def remove_image_from_product(db: Session, sku: str, image_id: int) -> bool:
@@ -446,12 +460,26 @@ def remove_image_from_product(db: Session, sku: str, image_id: int) -> bool:
         else:
             print("La imagen no estaba asociada al producto")
     """
-    db_product_image = db.query(models.ProductImage).filter_by(sku=sku, image_id=image_id).first()
-    if db_product_image:
-        db.delete(db_product_image)
+    db_association = db.query(ProductImage).filter_by(product_sku=sku, image_id=image_id).first()
+    
+    if db_association:
+        db.delete(db_association)
         db.commit()
         return True
+    
     return False
+
+
+def get_product_images(db: Session, sku: str) -> List[Image]:
+    """
+    Obtiene todas las imágenes asociadas a un producto.
+    """
+    product = get_product_by_sku(db, sku)
+    if not product:
+        return []
+    
+    return [assoc.image for assoc in product.images_association]
+
 
 # ========================================
 # FUNCIONES AUXILIARES Y FUTURAS EXTENSIONES
@@ -459,15 +487,15 @@ def remove_image_from_product(db: Session, sku: str, image_id: int) -> bool:
 
 # Funciones utilitarias que se podrían añadir en el futuro:
 
-# def get_products_by_category_hierarchy(db: Session, category_id: int, include_subcategories: bool = True) -> List[models.Product]:
+# def get_products_by_category_hierarchy(db: Session, category_id: int, include_subcategories: bool = True) -> List[Product]:
 #     """Obtiene productos de una categoría y opcionalmente sus subcategorías."""
 #     pass
 
-# def search_products_full_text(db: Session, search_term: str, limit: int = 50) -> List[models.Product]:
+# def search_products_full_text(db: Session, search_term: str, limit: int = 50) -> List[Product]:
 #     """Búsqueda full-text en nombre, descripción y especificaciones."""
 #     pass
 
-# def get_products_low_stock(db: Session, threshold: int = 10) -> List[models.Product]:
+# def get_products_low_stock(db: Session, threshold: int = 10) -> List[Product]:
 #     """Obtiene productos con stock bajo el umbral especificado."""
 #     pass
 

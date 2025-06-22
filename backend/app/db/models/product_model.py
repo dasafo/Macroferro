@@ -1,0 +1,44 @@
+# backend/app/db/models/product.py
+from sqlalchemy import Column, Integer, String, ForeignKey, Text, Numeric, UniqueConstraint
+from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import JSONB
+
+from app.db.database import Base
+
+class Product(Base):
+    __tablename__ = "products"
+
+    sku = Column(String(50), primary_key=True, index=True)
+    category_id = Column(Integer, ForeignKey("categories.category_id", ondelete="SET NULL"), nullable=True)
+    name = Column(String(255), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    price = Column(Numeric(10, 2), nullable=False)
+    brand = Column(String(100), nullable=True, index=True)
+    spec_json = Column(JSONB, nullable=True)
+
+    category = relationship("Category", back_populates="products")
+    images_association = relationship("ProductImage", back_populates="product", cascade="all, delete-orphan")
+
+    @property
+    def images(self):
+        return [assoc.image for assoc in self.images_association if assoc.image]
+
+
+class Image(Base):
+    __tablename__ = "images"
+
+    image_id = Column(Integer, primary_key=True, autoincrement=True)
+    url = Column(Text, unique=True, nullable=False, index=True)
+    alt_text = Column(String(255), nullable=True)
+
+    products_association = relationship("ProductImage", back_populates="image", cascade="all, delete-orphan")
+
+
+class ProductImage(Base):
+    __tablename__ = "product_images"
+
+    sku = Column(String(50), ForeignKey("products.sku", ondelete="CASCADE"), primary_key=True)
+    image_id = Column(Integer, ForeignKey("images.image_id", ondelete="CASCADE"), primary_key=True)
+
+    product = relationship("Product", back_populates="images_association")
+    image = relationship("Image", back_populates="products_association") 

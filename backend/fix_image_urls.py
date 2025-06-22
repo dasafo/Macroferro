@@ -9,8 +9,14 @@ con URLs de ejemplo que sí funcionan para hotlinking en Telegram.
 import asyncio
 import httpx
 from sqlalchemy.orm import Session
-from app.db.database import SessionLocal
-from app.db import models
+import sys
+import os
+
+# Añadir la ruta del proyecto al sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from app.db.session import SessionLocal
+from app.db.models.product_model import Image
 
 # URLs de imágenes de ejemplo que funcionan con hotlinking
 # Usando picsum.photos que es muy confiable
@@ -38,7 +44,7 @@ def fix_image_urls():
     db = SessionLocal()
     try:
         # Obtener todas las imágenes
-        images = db.query(models.Image).all()
+        images = db.query(Image).all()
         print(f"Encontradas {len(images)} imágenes para verificar...")
         
         fixed_count = 0

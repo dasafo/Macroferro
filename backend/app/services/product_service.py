@@ -35,7 +35,7 @@ from typing import List, Optional, Dict, Any
 import asyncio
 import logging
 
-from app.db import models
+from app.db.models.product_model import Product # Actualizado
 from app.crud import product_crud, category_crud  # Removido image_crud hasta que se implemente
 from app.schemas import product as product_schema
 from openai import AsyncOpenAI, OpenAI # Usar cliente asíncrono
@@ -90,54 +90,11 @@ class ProductService:
     # OPERACIONES DE CONSULTA AVANZADA
     # ========================================
 
-    def get_product_by_sku_details(self, db: Session, sku: str) -> Optional[models.Product]:
+    def get_product_by_sku_details(self, db: Session, sku: str) -> Optional[Product]:
         """
         Obtiene los detalles completos de un producto por SKU con validaciones de negocio.
-        
-        Esta función actúa como punto de entrada principal para obtener información
-        detallada de un producto, incluyendo todas sus relaciones (categoría, imágenes).
-        Permite agregar lógica de negocio adicional como cálculos derivados y validaciones.
-        
-        Args:
-            db: Sesión de SQLAlchemy
-            sku: Código único del producto
-            
-        Returns:
-            Objeto Product con relaciones cargadas, o None si no existe
-            
-        Funcionalidades actuales:
-            - Carga eager de categoría e imágenes (optimización N+1)
-            - Validación implícita de existencia
-            
-        Extensiones futuras:
-            - Cálculo de stock total desde múltiples almacenes
-            - Aplicación de descuentos o precios especiales por usuario
-            - Logging de accesos a productos para análisis de demanda
-            - Verificación de permisos de visualización por categoría
-            - Métricas de popularidad y recomendaciones relacionadas
-            
-        Consideraciones de negocio:
-            - Productos descatalogados vs productos inactivos
-            - Visibilidad según contexto del usuario (B2B vs B2C)
-            - Información sensible que no debe mostrarse en ciertos contextos
         """
         product = product_crud.get_product_by_sku(db, sku=sku)
-        
-        # Validación de existencia con manejo de errores futuro:
-        # if not product:
-        #     raise NotFoundError(f"Product with SKU {sku} not found")
-        
-        # Extensiones futuras para enriquecimiento de datos:
-        # if product:
-        #     # Calcular stock total si no se hace en CRUD
-        #     product.total_stock = self._calculate_total_stock(db, sku)
-        #     
-        #     # Aplicar reglas de negocio específicas
-        #     product.is_available = self._check_availability(product)
-        #     
-        #     # Logging para análisis de demanda
-        #     self._log_product_access(sku, user_context)
-        
         return product
 
     def get_all_products_with_details(
@@ -150,44 +107,9 @@ class ProductService:
         min_price: Optional[float] = None,
         max_price: Optional[float] = None,
         name_like: Optional[str] = None
-    ) -> List[models.Product]:
+    ) -> List[Product]:
         """
         Obtiene una lista filtrada de productos con lógica de negocio aplicada.
-        
-        Esta función proporciona capacidades avanzadas de búsqueda y filtrado,
-        aplicando reglas de negocio específicas y validaciones que van más allá
-        de las simples consultas CRUD.
-        
-        Args:
-            db: Sesión de SQLAlchemy
-            skip: Offset para paginación
-            limit: Límite de registros por página
-            category_id: Filtro por categoría (opcional)
-            brand: Filtro por marca con búsqueda parcial (opcional)
-            min_price: Precio mínimo (inclusivo, opcional)
-            max_price: Precio máximo (inclusivo, opcional)
-            name_like: Búsqueda parcial en nombre (opcional)
-            
-        Returns:
-            Lista de productos filtrados con relaciones cargadas
-            
-        Validaciones de negocio aplicadas:
-            - Límites de paginación según tipo de usuario
-            - Filtros de disponibilidad automáticos
-            - Exclusión de productos descatalogados
-            - Aplicación de permisos por categoría
-            
-        Optimizaciones implementadas:
-            - Eager loading de relaciones para evitar N+1 queries
-            - Índices utilizados eficientemente en filtros
-            - Paginación optimizada para grandes catálogos
-            
-        Extensiones futuras:
-            - Ordenamiento inteligente por popularidad
-            - Filtros adicionales (etiquetas, atributos dinámicos)
-            - Búsqueda full-text en especificaciones
-            - Integración con sistema de recomendaciones
-            - Precios dinámicos según contexto del usuario
         """
         # Validación de límites de paginación (regla de negocio)
         max_limit = 1000  # Prevenir consultas excesivamente grandes
@@ -207,61 +129,15 @@ class ProductService:
             db, skip=skip, limit=limit, category_id=category_id, brand=brand,
             min_price=min_price, max_price=max_price, name_like=name_like
         )
-        
-        # Aplicar reglas de negocio adicionales (futuras):
-        # filtered_products = []
-        # for product in products:
-        #     # Verificar disponibilidad según reglas de negocio
-        #     if self._is_product_available_for_user(product, user_context):
-        #         # Enriquecer con información calculada
-        #         product.display_price = self._calculate_display_price(product, user_context)
-        #         filtered_products.append(product)
-        
         return products
 
     # ========================================
     # OPERACIONES DE ESCRITURA CON ORQUESTACIÓN
     # ========================================
 
-    def create_new_product(self, db: Session, product_in: product_schema.ProductCreate, image_urls: Optional[List[str]] = None) -> models.Product:
+    def create_new_product(self, db: Session, product_in: product_schema.ProductCreate, image_urls: Optional[List[str]] = None) -> Product:
         """
         Crea un nuevo producto con validaciones completas y asociación de imágenes.
-        
-        Esta función orquesta la creación completa de un producto, incluyendo
-        validaciones de negocio, verificación de dependencias y asociación
-        automática con imágenes si se proporcionan.
-        
-        Args:
-            db: Sesión de SQLAlchemy
-            product_in: Esquema Pydantic con datos validados del producto
-            image_urls: Lista opcional de URLs de imágenes para asociar
-            
-        Returns:
-            Objeto Product recién creado con todas sus relaciones
-            
-        Validaciones de negocio implementadas:
-            1. Verificación de unicidad del SKU
-            2. Validación de existencia de categoría asociada
-            3. Verificación de formato de especificaciones JSON
-            4. Validación de URLs de imágenes (si se proporcionan)
-            
-        Orquestación de operaciones:
-            - Creación del producto base
-            - Procesamiento y asociación de imágenes
-            - Manejo de transacciones para consistencia
-            - Rollback automático en caso de errores
-            
-        Consideraciones especiales:
-            - Para carga CSV: Las validaciones están relajadas
-            - Para API: Se aplican todas las validaciones estrictas
-            - URLs de imágenes inválidas generan advertencias, no errores
-            - Las transacciones garantizan atomicidad de la operación
-            
-        Extensiones preparadas (comentadas):
-            - Sistema de creación/reutilización de imágenes
-            - Validaciones avanzadas de especificaciones
-            - Integración con sistema de inventario inicial
-            - Notificaciones automáticas de nuevos productos
         """
         # VALIDACIÓN 1: Verificar unicidad del SKU
         existing_product = product_crud.get_product_by_sku(db, sku=product_in.sku)
@@ -284,89 +160,12 @@ class ProductService:
                 pass
 
         # OPERACIÓN PRINCIPAL: Crear el producto
-        db_product = product_crud.create_product(db=db, product=product_in)
+        new_product = product_crud.create_product(db=db, product=product_in, image_urls=image_urls)
+        return new_product
 
-        # ORQUESTACIÓN: Procesar y asociar imágenes si se proporcionan
-        # Esta sección está preparada para cuando se implemente el sistema de imágenes completo
-        if image_urls:
-            # Procesar cada URL de imagen proporcionada
-            successful_associations = 0
-            failed_urls = []
-            
-            for url_str in image_urls:
-                try:
-                    # Validación de formato de URL (manejada por Pydantic en el futuro)
-                    # image_data = image_schema.ImageCreate(url=str(url_str))
-                    
-                    # Obtener o crear la imagen en el sistema
-                    # Esta función manejará la deduplicación de imágenes
-                    # db_image = image_crud.get_or_create_image(db=db, image_in=image_data)
-                    
-                    # Asociar la imagen al producto
-                    # association = product_crud.add_image_to_product(
-                    #     db=db, sku=db_product.sku, image_id=db_image.image_id
-                    # )
-                    # 
-                    # if association:
-                    #     successful_associations += 1
-                    
-                    pass  # Placeholder para implementación futura
-                    
-                except ValueError as e:
-                    # Manejar URLs inválidas sin fallar toda la operación
-                    failed_urls.append(url_str)
-                    print(f"Advertencia: URL de imagen no válida '{url_str}': {e}")
-                    # En producción, usar logging en lugar de print
-                    # logger.warning(f"Invalid image URL for product {db_product.sku}: {url_str} - {e}")
-                except Exception as e:
-                    # Manejar otros errores de procesamiento de imágenes
-                    failed_urls.append(url_str)
-                    print(f"Error procesando imagen '{url_str}': {e}")
-                    # logger.error(f"Error processing image for product {db_product.sku}: {url_str} - {e}")
-            
-            # Logging de resultados del procesamiento de imágenes
-            if image_urls:
-                total_urls = len(image_urls)
-                failed_count = len(failed_urls)
-                print(f"Procesamiento de imágenes: {successful_associations}/{total_urls} exitosas, {failed_count} fallidas")
-        
-        # Refrescar el objeto para cargar relaciones creadas
-        db.refresh(db_product)
-        return db_product
-
-    def update_existing_product(self, db: Session, sku: str, product_in: product_schema.ProductUpdate) -> Optional[models.Product]:
+    def update_existing_product(self, db: Session, sku: str, product_in: product_schema.ProductUpdate) -> Optional[Product]:
         """
-        Actualiza un producto existente con validaciones de negocio complejas.
-        
-        Esta función maneja actualizaciones que pueden afectar múltiples aspectos
-        del sistema: relaciones con categorías, especificaciones técnicas,
-        precios que podrían afectar órdenes pendientes, etc.
-        
-        Args:
-            db: Sesión de SQLAlchemy
-            sku: SKU del producto a actualizar (identificador inmutable)
-            product_in: Esquema Pydantic con campos a actualizar
-            
-        Returns:
-            Objeto Product actualizado, o None si no existe
-            
-        Validaciones de negocio complejas:
-            1. Verificación de existencia del producto
-            2. Validación de nueva categoría (si se cambia)
-            3. Verificación de impacto en precios para órdenes pendientes
-            4. Validación de especificaciones JSON actualizadas
-            
-        Consideraciones especiales:
-            - SKU es inmutable (identificador de negocio)
-            - Cambios de precio pueden requerir aprobación
-            - Cambios de categoría afectan clasificación y navegación
-            - Especificaciones JSON se reemplazan completamente
-            
-        Reglas de negocio futuras:
-            - Audit trail de cambios críticos (precio, categoría)
-            - Notificaciones automáticas de cambios relevantes
-            - Validación de permisos según tipo de cambio
-            - Integración con workflow de aprobaciones
+        Actualiza un producto existente con orquestación de relaciones y validaciones.
         """
         # VALIDACIÓN PREVIA: Verificar existencia del producto
         product = product_crud.get_product_by_sku(db, sku=sku)
@@ -404,46 +203,12 @@ class ProductService:
         #     if validation_errors:
         #         raise ValidationError(f"Invalid specifications: {validation_errors}")
 
-        return product_crud.update_product(db=db, sku=sku, product_update=product_in)
+        updated_product = product_crud.update_product(db=db, sku=sku, product=product_in)
+        return updated_product
 
-    def delete_existing_product(self, db: Session, sku: str) -> Optional[models.Product]:
+    def delete_existing_product(self, db: Session, sku: str) -> Optional[Product]:
         """
-        Elimina un producto con validaciones críticas de integridad de negocio.
-        
-        Esta operación es especialmente crítica porque puede afectar:
-        - Órdenes de compra pendientes
-        - Historial de facturación
-        - Referencias en el sistema de inventario
-        - Enlaces desde catálogos externos
-        
-        Args:
-            db: Sesión de SQLAlchemy
-            sku: SKU del producto a eliminar
-            
-        Returns:
-            Objeto Product eliminado, o None si no existía
-            
-        Restricciones de integridad (manejadas por FK constraints):
-            - invoice_items: ON DELETE RESTRICT previene eliminación si está facturado
-            - product_images: ON DELETE CASCADE elimina asociaciones automáticamente
-            - stock: ON DELETE CASCADE elimina registros de inventario
-            
-        Validaciones de negocio críticas:
-            1. Verificar ausencia en facturas históricas
-            2. Evaluar impacto en órdenes pendientes
-            3. Considerar valor de inventario que se perdería
-            4. Verificar dependencias en sistemas externos
-            
-        Alternativas a eliminación física:
-            - Descatalogar: Marcar como inactivo/descatalogado
-            - Archivar: Mover a tabla de productos históricos
-            - Soft delete: Marcar como eliminado pero preservar datos
-            
-        Procedimiento recomendado:
-            1. Verificar restricciones de negocio
-            2. Calcular impacto financiero
-            3. Requerir confirmación explícita
-            4. Ejecutar eliminación con logging completo
+        Elimina un producto y maneja sus relaciones y dependencias.
         """
         # VALIDACIÓN PREVIA: Verificar existencia del producto
         product_to_delete = product_crud.get_product_by_sku(db, sku=sku)
@@ -455,7 +220,6 @@ class ProductService:
         # VALIDACIONES CRÍTICAS DE NEGOCIO (futuras):
         
         # 1. Verificar asociaciones con facturas (crítico para integridad contable)
-        # invoice_items_count = db.query(models.InvoiceItem).filter(models.InvoiceItem.sku == sku).count()
         # if invoice_items_count > 0:
         #     raise InvalidOperationError(
         #         f"Cannot delete product SKU {sku}: referenced in {invoice_items_count} invoice items. "
@@ -483,18 +247,14 @@ class ProductService:
         # - invoice_items: RESTRICT (previene eliminación si está facturado)
         # 
         # Si hay restricciones, SQLAlchemy lanzará IntegrityError que debe capturarse en la API
-
         try:
-            return product_crud.delete_product(db=db, sku=sku)
+            deleted_product = product_crud.delete_product(db=db, sku=sku)
+            return deleted_product
         except Exception as e:
             # En producción, manejar específicamente IntegrityError
-            # if isinstance(e, IntegrityError):
-            #     if "invoice_items" in str(e):
-            #         raise InvalidOperationError(f"Cannot delete product {sku}: referenced in existing invoices")
-            #     else:
-            #         raise InvalidOperationError(f"Cannot delete product {sku}: has dependent records")
-            # raise
-            raise  # Re-lanzar la excepción para manejo en capas superiores
+            logger.error(f"Error al eliminar producto {sku}: {e}")
+            # raise InvalidOperationError(f"Could not delete product {sku}. It might be referenced in an invoice.")
+            return None
 
     async def search_products(
         self, 
@@ -503,82 +263,77 @@ class ProductService:
         top_k: int = 10, 
         category_filter: Optional[int] = None
     ) -> dict:
-        logger.debug(f"Starting search for query: '{query_text}' with top_k: {top_k}")
-        
-        if not settings.OPENAI_API_KEY:
-            logger.warning("OPENAI_API_KEY no configurada para búsqueda semántica")
-            return {"main_results": [], "related_results": []}
-
-        # Ensure clients are initialized
+        """
+        Realiza una búsqueda semántica de productos usando embeddings y Qdrant,
+        con un filtrado opcional por categoría.
+        """
         self._ensure_clients()
-
+        
         try:
-            # Generate embedding for search query
-            response = self.openai_client.embeddings.create(
-                input=query_text,
-                model="text-embedding-3-small"
-            )
-            query_embedding = response.data[0].embedding
-            
-            # Prepare search filter if category is specified
-            search_filter = None
-            if category_filter:
-                search_filter = Filter(
+            # 1. Generar embedding para la consulta del usuario
+            query_embedding = await self.get_embedding(query_text)
+
+            # 2. Construir filtro de Qdrant si se especifica una categoría
+            qdrant_filter = None
+            if category_filter is not None:
+                qdrant_filter = qdrant_models.Filter(
                     must=[
-                        FieldCondition(
+                        qdrant_models.FieldCondition(
                             key="category_id",
-                            match=MatchValue(value=category_filter)
+                            match=qdrant_models.MatchValue(value=category_filter)
                         )
                     ]
                 )
-            
-            # Search in Qdrant
-            search_results = self.qdrant_client.search(
+
+            # 3. Realizar búsqueda en Qdrant
+            search_result = self.qdrant_client.search(
                 collection_name=settings.QDRANT_COLLECTION_NAME,
                 query_vector=query_embedding,
-                query_filter=search_filter,
-                limit=top_k
+                limit=top_k,
+                query_filter=qdrant_filter,
+                with_payload=True
             )
+
+            # 4. Procesar resultados y obtener SKUs
+            found_skus = [point.payload['sku'] for point in search_result]
             
-            # Filter by similarity threshold
-            similarity_threshold = 0.4  # Balanced threshold - not too strict, not too permissive
-            filtered_results = [
-                result for result in search_results 
-                if result.score >= similarity_threshold
-            ]
-            
-            if not filtered_results:
+            if not found_skus:
                 return {"main_results": [], "related_results": []}
+
+            # 5. Recuperar productos de la base de datos
+            # Usar una función optimizada para obtener múltiples productos por SKU
+            products_db = product_crud.get_products_by_skus(db, skus=found_skus)
             
-            # Extract SKUs from filtered results
-            skus = [result.payload["sku"] for result in filtered_results]
+            # Mapear productos por SKU para fácil acceso
+            products_map = {p.sku: p for p in products_db}
             
-            # Get full product details from PostgreSQL
-            products = db.query(models.Product).filter(models.Product.sku.in_(skus)).all()
+            # Ordenar los productos según el orden de Qdrant y separar
+            ordered_products = [products_map[sku] for sku in found_skus if sku in products_map]
             
-            # Create a mapping for quick lookup
-            product_map = {product.sku: product for product in products}
-            
-            # Sort products by relevance (same order as Qdrant results)
-            sorted_products = []
-            for result in filtered_results:
-                sku = result.payload["sku"]
-                if sku in product_map:
-                    sorted_products.append(product_map[sku])
-            
-            # Split into main and related results
-            main_count = min(2, len(sorted_products))
-            main_results = sorted_products[:main_count]
-            related_results = sorted_products[main_count:main_count+2]
-            
-            return {
-                "main_results": [product_schema.ProductResponse.from_orm(product) for product in main_results],
-                "related_results": [product_schema.ProductResponse.from_orm(product) for product in related_results]
-            }
-            
+            main_results = ordered_products[:top_k//2]
+            related_results = ordered_products[top_k//2:]
+
+            return {"main_results": main_results, "related_results": related_results}
+
         except Exception as e:
-            logger.error(f"Error in search_products: {str(e)}")
-            raise e
+            logger.error(f"Error en search_products: {e}")
+            return {"main_results": [], "related_results": []}
+
+    async def get_embedding(self, text: str) -> List[float]:
+        """Genera embeddings para un texto usando el modelo de OpenAI."""
+        if not settings.OPENAI_API_KEY:
+            logger.warning("OPENAI_API_KEY no configurada para búsqueda semántica")
+            return []
+
+        try:
+            response = self.openai_client.embeddings.create(
+                input=text,
+                model="text-embedding-3-small"
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            logger.error(f"Error al generar embedding: {e}")
+            return []
 
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO
