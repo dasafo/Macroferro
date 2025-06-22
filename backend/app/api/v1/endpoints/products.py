@@ -112,10 +112,13 @@ async def create_product(
         HTTPException: 422 si datos son inválidos
         HTTPException: 500 si hay error de consistencia
     """
+    logger.info(f"🆕 PRODUCTO: Creando producto con SKU '{product_in.sku}'")
+    
     # VALIDACIÓN PREVIA: Verificar unicidad del SKU
     # Esta validación temprana evita errores 500 y proporciona mensajes claros
     existing_product = product_service.get_product_by_sku_details(db, sku=product_in.sku)
     if existing_product:
+        logger.error(f"❌ ERROR: Product with SKU {product_in.sku} already exists.")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Product with SKU {product_in.sku} already exists."
@@ -129,6 +132,7 @@ async def create_product(
     created_product_details = product_service.get_product_by_sku_details(db, sku=product.sku)
     if not created_product_details:
         # Este caso indica un problema serio de consistencia de datos
+        logger.error(f"❌ ERROR: Error creating product details for SKU {product.sku}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
             detail="Error creating product details"
@@ -145,6 +149,7 @@ async def create_product(
     # except ValidationError as e:  # Especificaciones JSON inválidas
     #     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     
+    logger.info(f"✅ PRODUCTO: Creado exitosamente SKU '{created_product_details.sku}'")
     return created_product_details
 
 
@@ -209,9 +214,12 @@ async def update_product(
         HTTPException: 422 si los datos son inválidos
         HTTPException: 500 si hay error de consistencia
     """
+    logger.info(f"🔄 PRODUCTO: Actualizando producto SKU '{sku}'")
+    
     # DELEGACIÓN A SERVICIO: Actualizar con validaciones de negocio
     updated_product = product_service.update_existing_product(db=db, sku=sku, product_in=product_in)
     if not updated_product:
+        logger.error(f"❌ ERROR: No se pudo actualizar el producto SKU '{sku}'")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found for update")
     
     # ENRIQUECIMIENTO DE RESPUESTA: Recargar con relaciones actualizadas
@@ -219,6 +227,7 @@ async def update_product(
     product_details = product_service.get_product_by_sku_details(db, sku=updated_product.sku)
     if not product_details:
         # Este caso indica problema de consistencia después de la actualización
+        logger.error(f"❌ ERROR: Error fetching updated product details for SKU {updated_product.sku}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
             detail="Error fetching updated product details"
@@ -237,6 +246,7 @@ async def update_product(
     # except BusinessRuleError as e:  # Violación de reglas de negocio
     #     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     
+    logger.info(f"✅ PRODUCTO: Actualizado exitosamente SKU '{sku}'")
     return product_details
 
 
@@ -302,9 +312,12 @@ async def delete_product(
         Si el producto está referenciado en facturas, la BD impedirá
         la eliminación y se debe capturar la excepción de integridad.
     """
+    logger.info(f"🗑️ PRODUCTO: Eliminando producto SKU '{sku}'")
+    
     # DELEGACIÓN A SERVICIO: Eliminar con validaciones críticas
     deleted_product = product_service.delete_existing_product(db=db, sku=sku)
     if not deleted_product:
+        logger.error(f"❌ ERROR: No se pudo eliminar el producto SKU '{sku}'")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, 
             detail="Product not found for deletion or cannot be deleted (e.g., in an invoice)."
@@ -322,6 +335,7 @@ async def delete_product(
     # except IntegrityError as e:  # Violación de constraints de BD
     #     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Cannot delete: product has dependencies")
     
+    logger.info(f"✅ PRODUCTO: Eliminado exitosamente SKU '{sku}'")
     return deleted_product
 
 # ========================================
@@ -375,8 +389,11 @@ async def read_product(
     Raises:
         HTTPException: 404 si el producto no existe
     """
+    logger.debug(f"🔍 PRODUCTO: Buscando producto SKU '{sku}'")
+    
     product = product_service.get_product_by_sku_details(db=db, sku=sku)
     if not product:
+        logger.warning(f"⚠️ PRODUCTO: No encontrado SKU '{sku}'")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
     
     return product
@@ -468,12 +485,16 @@ async def read_products(
         Todos los filtros son opcionales y se pueden combinar.
         Los resultados están limitados por paginación para performance.
     """
+    logger.debug(f"📋 PRODUCTOS: Listando con filtros - skip={skip}, limit={limit}")
+    
     # DELEGACIÓN A SERVICIO: Búsqueda con filtros complejos
     # El servicio maneja la lógica de combinación de filtros y optimizaciones
     products = product_service.get_all_products_with_details(
         db=db, skip=skip, limit=limit, category_id=category_id, brand=brand,
         min_price=min_price, max_price=max_price, name_like=name  # name_like en el servicio
     )
+    
+    logger.debug(f"📋 PRODUCTOS: Encontrados {len(products)} resultados")
     return products
 
 @router.post("/search", response_model=product_schema.ProductSearchResponse)
@@ -488,9 +509,10 @@ async def search_products(
     - `main_results`: Los 3 productos más relevantes.
     - `related_results`: Los siguientes 2 productos como sugerencias.
     """
-    logger.info(f"🎯 ENDPOINT: Iniciando búsqueda para '{query.query_text}' con top_k={query.top_k}")
+    logger.info(f"🎯 BÚSQUEDA: Iniciando búsqueda para '{query.query_text}' con top_k={query.top_k}")
     
     if not query.query_text.strip():
+        logger.warning("⚠️ BÚSQUEDA: Consulta vacía recibida")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La consulta de búsqueda no puede estar vacía.")
 
     # El servicio ahora devuelve un diccionario con 'main_results' y 'related_results'
@@ -502,9 +524,12 @@ async def search_products(
 
     if not search_results["main_results"] and not search_results["related_results"]:
         # Devolver una respuesta vacía pero bien formada si no hay resultados
+        logger.info(f"🔍 BÚSQUEDA: Sin resultados para '{query.query_text}'")
         return product_schema.ProductSearchResponse(main_results=[], related_results=[])
 
     # Convertir a ProductSearchResponse para que Pydantic serialice correctamente las relaciones
+    logger.info(f"✅ BÚSQUEDA: {len(search_results['main_results'])} principales, {len(search_results['related_results'])} relacionados")
+    
     return product_schema.ProductSearchResponse(
         main_results=search_results["main_results"],
         related_results=search_results["related_results"]

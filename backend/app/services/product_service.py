@@ -541,7 +541,7 @@ class ProductService:
             )
             
             # Filter by similarity threshold
-            similarity_threshold = 0.5
+            similarity_threshold = 0.4  # Balanced threshold - not too strict, not too permissive
             filtered_results = [
                 result for result in search_results 
                 if result.score >= similarity_threshold

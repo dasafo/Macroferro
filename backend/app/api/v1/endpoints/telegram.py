@@ -18,16 +18,6 @@ telegram_service = TelegramBotService() if settings.telegram_bot_token else None
 
 router = APIRouter()
 
-def verify_telegram_webhook(
-    body: bytes, 
-    secret_token: str, 
-    x_telegram_bot_api_secret_token: Optional[str] = None
-) -> bool:
-    """Verificar que la request viene de Telegram"""
-    if not x_telegram_bot_api_secret_token:
-        return False
-    return hmac.compare_digest(secret_token, x_telegram_bot_api_secret_token)
-
 @router.post("/webhook")
 async def telegram_webhook(
     request: Request,
@@ -147,34 +137,6 @@ async def process_and_respond_multiple(update_data: dict, bot_service: TelegramB
             )
         except Exception as send_error:
             logger.error(f"Error enviando mensaje de error: {send_error}")
-
-# Mantener función original para compatibilidad
-async def process_and_respond(db: Session, user_message: str, chat_id: int):
-    """Procesar mensaje y enviar respuesta (versión original para compatibilidad)"""
-    if not telegram_service:
-        logger.error("Telegram service not configured")
-        return
-        
-    try:
-        # Procesar mensaje con IA
-        response_messages = await telegram_service.process_message(db, user_message, chat_id)
-        
-        # Enviar solo el primer mensaje para mantener compatibilidad
-        if response_messages:
-            await telegram_service.send_message(chat_id, response_messages[0])
-        
-        logger.info(f"Respuesta enviada a chat {chat_id}")
-        
-    except Exception as e:
-        logger.error(f"Error procesando mensaje: {e}")
-        # Enviar mensaje de error al usuario
-        try:
-            await telegram_service.send_message(
-                chat_id, 
-                "❌ Lo siento, hubo un error procesando tu mensaje."
-            )
-        except:
-            logger.error(f"No se pudo enviar mensaje de error a chat {chat_id}")
 
 @router.post("/set-webhook")
 async def set_webhook():
