@@ -191,4 +191,26 @@ async def webhook_status():
         "status": "webhook endpoint configured",
         "description": "Endpoint listo para recibir actualizaciones de Telegram",
         "webhook_url": settings.telegram_webhook_url or "not_configured"
-    } 
+    }
+
+@router.post("/test")
+async def test_webhook(
+    request_data: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Endpoint de prueba para simular mensajes de Telegram sin validación de firma.
+    Solo para testing y desarrollo.
+    """
+    if not telegram_service:
+        raise HTTPException(status_code=503, detail="Telegram service not configured")
+    
+    try:
+        # Procesar el mensaje directamente
+        response_data = await telegram_service.process_message(db, request_data.get("message", {}))
+        
+        return response_data
+        
+    except Exception as e:
+        logger.error(f"Error en test endpoint: {e}")
+        return {"error": str(e)} 
