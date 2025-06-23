@@ -606,6 +606,9 @@ Ejemplos de cart_action:
 - "Vacía mi carrito" → cart_action: "clear"
 - "Quiero finalizar la compra" → cart_action: "checkout"
 - "Comprar" → cart_action: "checkout"
+- "Quita 1 guante del carrito" -> cart_action: "remove", cart_quantity: 1, cart_product_reference: "guante"
+- "elimina dos de esos" -> cart_action: "remove", cart_quantity: 2, cart_product_reference: "esos"
+- "saca un adhesivo" -> cart_action: "remove", cart_quantity: 1, cart_product_reference: "un adhesivo"
 
 IMPORTANTE para cart_product_reference:
 - Mantén SIEMPRE la referencia en español exactamente como la dice el usuario
@@ -1743,78 +1746,127 @@ Responde en español de manera concisa pero completa.
 
     async def _handle_natural_remove_from_cart(self, db: Session, analysis: Dict, chat_id: int) -> Dict[str, Any]:
         """
-        Maneja quitar productos del carrito usando lenguaje natural.
+        Maneja quitar productos o reducir su cantidad del carrito usando lenguaje natural.
         """
         product_reference = analysis.get("cart_product_reference", "")
+        quantity_to_remove = analysis.get("cart_quantity")
+
+        if not product_reference:
+            return {
+                "type": "text_messages",
+                "messages": ["🤔 No pude identificar qué producto quieres quitar. Por favor, sé más específico."]
+            }
+            
+        sku = await self._resolve_product_reference(db, product_reference, chat_id)
+        if not sku:
+            return {
+                "type": "text_messages",
+                "messages": [f"🤔 No pude identificar qué producto quieres quitar: '{product_reference}'. ¿Podrías ser más específico o usar el SKU del producto?"]
+            }
         
-        # Resolver la referencia del producto a un SKU
-        if product_reference:
-            sku = await self._resolve_product_reference(db, product_reference, chat_id)
-            if not sku:
-                return {
-                    "type": "text_messages",
-                    "messages": [f"🤔 No pude identificar qué producto quieres quitar: '{product_reference}'. ¿Podrías ser más específico o usar el SKU del producto?"]
-                }
+        # Si se especifica una cantidad, reducirla
+        if quantity_to_remove and isinstance(quantity_to_remove, (int, float)) and quantity_to_remove > 0:
+            try:
+                async with self._get_api_client() as client:
+                    # Llamar al endpoint de agregar con cantidad negativa para reducir
+                    response = await client.post(
+                        f"/cart/{chat_id}/items",
+                        json={"product_sku": sku, "quantity": -int(quantity_to_remove)}
+                    )
+                    
+                    if response.status_code == 404:
+                        return {"type": "text_messages", "messages": [f"😕 El producto con SKU {sku} no se encontró en tu carrito."]}
+                    
+                    response.raise_for_status()
+                    cart_data = response.json()
+                    
+                    product_name = "producto"
+                    if sku in cart_data.get("items", {}):
+                         product_info = json.loads(cart_data["items"][sku]['product'])
+                         product_name = product_info.get("name", sku)
+                    
+                    # Verificar si el producto fue eliminado completamente
+                    if sku not in cart_data.get("items", {}):
+                        response_text = f"🗑️ Se ha eliminado completamente el producto *{product_name}* ({sku}) del carrito."
+                    else:
+                        response_text = f"✅ Se han eliminado {int(quantity_to_remove)} unidad(es) de *{product_name}*.\n\n"
+                    
+                    response_text += "\n\n" + self._format_cart_data(cart_data)
+
+                    return {"type": "text_messages", "messages": [response_text]}
+
+            except httpx.HTTPError as e:
+                logger.error(f"Error de API al reducir cantidad para chat {chat_id}: {e}")
+                error_msg = "Lo siento, ocurrió un error al actualizar el carrito."
+                if e.response.status_code == 400: # Por si la API devuelve un error específico
+                    try:
+                        error_detail = e.response.json().get("detail")
+                        if error_detail:
+                            error_msg = f"😕 Error: {error_detail}"
+                    except:
+                        pass
+                return {"type": "text_messages", "messages": [error_msg]}
+            except Exception as e:
+                logger.error(f"Error inesperado al reducir cantidad para chat {chat_id}: {e}")
+                return {"type": "text_messages", "messages": ["Ocurrió un error inesperado. Por favor, intenta de nuevo."]}
         else:
-            # Si no hay referencia específica, intentar usar el producto más reciente
-            recent_products = get_recent_products(db, chat_id)
-            if recent_products:
-                sku = recent_products[0]
-            else:
-                return {
-                    "type": "text_messages",
-                    "messages": ["🤔 No pude identificar qué producto quieres quitar. ¿Podrías especificar el producto o usar su SKU?"]
-                }
-        
-        # Usar la función existente de quitar del carrito
-        return await self._handle_remove_from_cart(chat_id, [sku])
+            # Si no se especifica cantidad, eliminar el producto completo
+            return await self._handle_remove_from_cart(chat_id, [sku])
 
     async def _resolve_product_reference(self, db: Session, reference: str, chat_id: int) -> str:
         """
-        Resuelve una referencia de producto a un SKU específico usando contexto de productos recientes.
-        Ahora maneja mejor las referencias ambiguas eligiendo el producto más relevante.
+        Resuelve una referencia de producto a un SKU específico.
+        Primero busca en el contexto del usuario (carrito + recientes) y si no encuentra,
+        realiza una nueva búsqueda semántica.
         """
         if not reference:
             return ""
+
+        # 1. Obtener productos del contexto (carrito y recientes)
+        cart_skus = []
+        try:
+            async with self._get_api_client() as client:
+                response = await client.get(f"/cart/{chat_id}")
+                if response.status_code == 200:
+                    cart_data = response.json()
+                    cart_skus = list(cart_data.get("items", {}).keys())
+        except Exception as e:
+            logger.error(f"No se pudo obtener el carrito para resolver referencia: {e}")
+
+        recent_skus = get_recent_products(db, chat_id, limit=15)
+        product_skus_to_check = cart_skus + [sku for sku in recent_skus if sku not in cart_skus]
         
-        reference_lower = reference.lower()
+        # 2. Buscar coincidencias en el contexto
+        context_candidates = []
+        if product_skus_to_check:
+            for sku in product_skus_to_check:
+                product = db.query(Product).filter(Product.sku == sku).first()
+                if product and self._matches_reference(product, reference):
+                    context_candidates.append(product)
         
-        # Términos comunes que indican productos recientes
-        recent_terms = [
-            "ese", "esa", "esos", "esas", "este", "esta", "estos", "estas",
-            "el último", "la última", "los últimos", "las últimas",
-            "anterior", "previo", "que mostré", "que mencioné"
-        ]
+        # 3. Si hay candidatos del contexto, resolver la ambigüedad y devolver
+        if context_candidates:
+            logger.info(f"Referencia '{reference}' encontrada en contexto del usuario.")
+            return self._resolve_ambiguous_reference(context_candidates, reference)
         
-        # Si contiene términos de referencia reciente, buscar en productos recientes
-        for term in recent_terms:
-            if term in reference_lower:
-                recent_products = get_recent_products(db, chat_id, limit=10)
-                for recent_product_sku in recent_products:
-                    product = db.query(Product).filter(Product.sku == recent_product_sku).first()
-                    if product and self._matches_reference(product, reference):
-                        return product.sku
-                break
-        
-        # Buscar en productos recientes sin términos específicos de referencia
-        recent_products = get_recent_products(db, chat_id, limit=15)
-        
-        # Crear lista de candidatos que coinciden con la referencia
-        candidates = []
-        
-        for recent_product_sku in recent_products:
-            product = db.query(Product).filter(Product.sku == recent_product_sku).first()
-            if product and self._matches_reference(product, reference):
-                candidates.append(product)
-        
-        # Si hay candidatos, resolver la ambigüedad
-        if candidates:
-            if len(candidates) == 1:
-                return candidates[0].sku
-            else:
-                # Múltiples candidatos - aplicar criterios de desambiguación
-                return self._resolve_ambiguous_reference(candidates, reference)
-        
+        # 4. Si no hay contexto, buscar producto por la referencia como una nueva búsqueda
+        logger.info(f"Referencia '{reference}' no encontrada en contexto, realizando búsqueda semántica.")
+        try:
+            search_results = await self.product_service.search_products(
+                db=db,
+                query_text=reference,
+                top_k=3  # Obtener algunos para la desambiguación
+            )
+            
+            search_candidates = search_results.get("main_results", [])
+            if search_candidates:
+                logger.info(f"Referencia '{reference}' encontrada mediante búsqueda semántica.")
+                return self._resolve_ambiguous_reference(search_candidates, reference)
+
+        except Exception as e:
+            logger.error(f"Error durante búsqueda semántica para resolver referencia: {e}")
+
+        logger.warning(f"No se pudo resolver la referencia de producto: '{reference}'")
         return ""
     
     def _resolve_ambiguous_reference(self, candidates: List, reference: str) -> str:
@@ -1859,14 +1911,28 @@ Responde en español de manera concisa pero completa.
         reference_words = [word for word in reference_lower.split() 
                           if word not in ["el", "la", "los", "las", "de", "del", "para", "con", "sin"]]
         
+        if not reference_words:
+            return False
+
         product_text = f"{product.name} {product.description or ''} {getattr(product, 'brand', '') or ''}".lower()
         
-        # Verificar si al menos 2 palabras clave coinciden (mejora la precisión)
+        # Verificar si las palabras clave coinciden
         matches = 0
         for word in reference_words:
+            # Comprobar si la palabra original o su forma singular (simple) están en el texto del producto
             if word in product_text:
                 matches += 1
-        
+                continue
+            
+            # Intentar con una forma singular simple
+            if word.endswith('s') and word[:-1] in product_text:
+                matches += 1
+                continue
+            
+            if word.endswith('es') and word[:-2] in product_text:
+                matches += 1
+                continue
+
         # Para referencias cortas (1-2 palabras), requerir al menos 1 coincidencia
         # Para referencias más largas, requerir al menos 2 coincidencias
         required_matches = 1 if len(reference_words) <= 2 else 2

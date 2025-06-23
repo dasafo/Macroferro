@@ -12,154 +12,113 @@ import sys
 # Configuración del endpoint
 BASE_URL = "http://localhost:8000"
 ENDPOINT = f"{BASE_URL}/api/v1/telegram/test"
+CHAT_ID = 12345 # Usar un chat_id consistente para mantener el contexto
 
-def send_message(text: str, chat_id: int = 123456789) -> dict:
+def send_message(text: str, chat_id: int = CHAT_ID) -> dict:
     """Envía un mensaje de prueba al bot y retorna la respuesta"""
     payload = {
         "message": {
             "message_id": int(time.time()),
-            "from": {
-                "id": chat_id,
-                "is_bot": False,
-                "first_name": "David",
-                "username": "david_test"
-            },
-            "chat": {
-                "id": chat_id,
-                "type": "private"
-            },
+            "from": {"id": chat_id, "is_bot": False, "first_name": "Test", "username": "test_user"},
+            "chat": {"id": chat_id, "type": "private"},
             "date": int(time.time()),
             "text": text
         }
     }
-    
     try:
-        response = requests.post(ENDPOINT, json=payload, timeout=30)
+        response = requests.post(ENDPOINT, json=payload, timeout=45)
+        response.raise_for_status()
         return {"success": True, "data": response.json()}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def print_conversation(user_msg: str, bot_response: dict):
-    """Imprime la conversación de manera bonita"""
-    print(f"\n👤 Usuario: {user_msg}")
-    
-    if not bot_response["success"]:
-        print(f"❌ Error: {bot_response['error']}")
+def print_step(step, description):
+    print(f"\n{'='*15} PASO {step}: {description} {'='*15}")
+
+def print_result(user_msg, response):
+    print(f"👤 Usuario: {user_msg}")
+    if not response["success"]:
+        print(f"❌ Error: {response['error']}")
         return
     
-    data = bot_response["data"]
+    data = response["data"]
     response_type = data.get("type", "unknown")
-    
-    print(f"🤖 Bot ({response_type}):")
     
     if response_type == "text_messages":
         messages = data.get("messages", [])
-        for msg in messages:
-            print(f"   💬 {msg}")
-    
-    elif response_type == "product_with_image":
-        product = data.get("product", {})
-        caption = data.get("caption", "")
-        additional = data.get("additional_messages", [])
-        
-        print(f"   🖼️ Producto: {product.get('name', 'N/A')} (SKU: {product.get('sku', 'N/A')})")
-        print(f"   📝 Caption: {caption[:100]}...")
-        
-        for msg in additional:
-            print(f"   💬 {msg}")
-    
+        for i, msg in enumerate(messages):
+            # Limitar la previsualización para no saturar la salida
+            preview = msg.replace('\n', ' ')[:250]
+            print(f"🤖 Bot: {preview}...")
     else:
-        print(f"   📋 Datos: {json.dumps(data, indent=2, ensure_ascii=False)}")
+        print(f"🤖 Bot ({response_type}): {json.dumps(data, indent=2, ensure_ascii=False)}")
+
 
 def main():
-    """Ejecuta una conversación completa de prueba"""
-    print("🚀 Iniciando conversación de prueba completa...")
-    print("=" * 60)
+    print("🚀 Iniciando prueba de conversación para el carrito de compras...")
     
-    # Conversación Natural Completa
-    conversation = [
-        # 1. Saludo inicial
-        "Hola, buenos días",
-        
-        # 2. Búsqueda de producto específico que sabemos que existe
-        "Busco Tornillos UNC para Plástico Facom",
-        
-        # 3. Pregunta específica sobre ese producto
-        "¿Qué especificaciones tienen esos tornillos UNC?",
-        
-        # 4. Agregar producto al carrito (referencia natural)
-        "Agrega esos tornillos UNC al carrito",
-        
-        # 5. Buscar otro tipo de producto específico
-        "Necesito también Tornillos Métricos para Plástico Bosch",
-        
-        # 6. Agregar con cantidad específica
-        "Agrega 2 de esos tornillos métricos al carrito",
-        
-        # 7. Ver carrito actual
-        "Muéstrame mi carrito",
-        
-        # 8. Pregunta técnica sobre producto reciente
-        "¿Cuál es el peso de los tornillos Bosch?",
-        
-        # 9. Quitar producto específico
-        "Quita los tornillos UNC del carrito",
-        
-        # 10. Ver carrito actualizado
-        "¿Cómo está mi carrito ahora?",
-        
-        # 11. Buscar producto por categoría
-        "Busco herramientas para construcción",
-        
-        # 12. Agregar herramienta específica
-        "Agrega el taladro Hilti al carrito",
-        
-        # 13. Finalizar compra
-        "Quiero finalizar la compra",
-        
-        # 14. Verificar carrito después de compra
-        "¿Está vacío mi carrito?",
-        
-        # 15. Despedida
-        "Gracias, hasta luego"
-    ]
+    # --- SETUP: Vaciar carrito y añadir productos ---
+    print_step(0, "Setup - Limpiando el carrito")
+    print_result("Vaciar carrito", send_message("/vaciar_carrito"))
+    time.sleep(1)
+
+    print_step(0, "Setup - Buscar y añadir 3 Guantes")
+    print_result("Buscar guantes", send_message("Busco Guantes Multiusos Facom"))
+    time.sleep(2)
+    print_result("Añadir 3 guantes", send_message("Añade 3 de esos guantes"))
+    time.sleep(2)
+
+    print_step(0, "Setup - Buscar y añadir 3 Adhesivos")
+    print_result("Buscar adhesivos", send_message("Busco Adhesivo para Madera Makita"))
+    time.sleep(2)
+    print_result("Añadir 3 adhesivos", send_message("añade 3 de esos adhesivos"))
+    time.sleep(2)
     
-    # Ejecutar conversación paso a paso
-    for i, message in enumerate(conversation, 1):
-        print(f"\n{'='*10} PASO {i} {'='*10}")
-        
-        # Enviar mensaje
-        response = send_message(message)
-        
-        # Mostrar conversación
-        print_conversation(message, response)
-        
-        # Pausa entre mensajes para simular conversación real
-        if i < len(conversation):
-            print("\n⏳ Esperando 2 segundos...")
-            time.sleep(2)
-    
-    print("\n" + "=" * 60)
-    print("✅ Conversación de prueba completada!")
-    print("\n📊 Resumen de funcionalidades probadas:")
-    print("   ✓ Saludo y conversación general")
-    print("   ✓ Búsqueda de productos por categoría")
-    print("   ✓ Consultas técnicas específicas")
-    print("   ✓ Agregar productos al carrito (natural)")
-    print("   ✓ Agregar productos con cantidades específicas")
-    print("   ✓ Ver contenido del carrito")
-    print("   ✓ Quitar productos del carrito")
-    print("   ✓ Finalizar compra")
-    print("   ✓ Vaciar carrito")
-    print("   ✓ Referencias contextuales ('ese producto', 'el último')")
+    # --- PRUEBA 1: Verificar carrito inicial ---
+    print_step(1, "Verificar estado inicial del carrito")
+    msg = "enséñame el carro"
+    resp = send_message(msg)
+    print_result(msg, resp)
+
+    # --- PRUEBA 2: Reducir cantidad de un producto ---
+    print_step(2, "Reducir la cantidad de un producto")
+    msg = "puede eliminar 1 un guante del carrito?"
+    resp = send_message(msg)
+    print_result(msg, resp)
+    time.sleep(2)
+
+    # --- PRUEBA 3: Verificar carrito tras reducir cantidad ---
+    print_step(3, "Verificar que la cantidad de guantes se haya reducido")
+    msg = "muéstrame el carrito"
+    resp = send_message(msg)
+    print_result(msg, resp)
+
+    # --- PRUEBA 4: Eliminar otro producto por referencia natural (plural) ---
+    print_step(4, "Eliminar producto por referencia natural en plural")
+    msg = "elimina los adhesivos"
+    resp = send_message(msg)
+    print_result(msg, resp)
+    time.sleep(2)
+
+    # --- PRUEBA 5: Verificar carrito final ---
+    print_step(5, "Verificar que los adhesivos se hayan eliminado")
+    msg = "ver carrito"
+    resp = send_message(msg)
+    print_result(msg, resp)
+
+    print("\n\n" + "="*50)
+    print("✅ Prueba de conversación del carrito finalizada.")
+    print("Por favor, revisa los resultados de cada paso.")
+
 
 if __name__ == "__main__":
     # Verificar que el backend esté corriendo
     try:
         health_check = requests.get(f"{BASE_URL}/api/v1/telegram/health", timeout=5)
         if health_check.status_code != 200:
-            print("❌ Backend no está respondiendo correctamente")
+            print("❌ El backend no está respondiendo correctamente. Abortando prueba.")
             sys.exit(1)
+        print("✅ Backend detectado correctamente.")
     except Exception as e:
         print(f"❌ No se puede conectar al backend: {e}")
         print("💡 Asegúrate de que el backend esté corriendo en localhost:8000")
