@@ -489,7 +489,10 @@ class TelegramBotService:
                     "\"¿Qué herramientas Bahco tienen?\"\n"
                     "\"Necesito conectores para electricidad\""
                 )
-                return await self.send_message(chat_id, response_text)
+                return {
+                    "type": "text_messages",
+                    "messages": [response_text]
+                }
             elif command == '/help':
                 response_text = (
                     "🤖 *Comandos disponibles en Macroferro Bot:*\n\n"
@@ -507,7 +510,10 @@ class TelegramBotService:
                     "❓ `/help` - Esta ayuda\n\n"
                     "💡 *Tip:* También puedes preguntarme directamente sobre productos usando lenguaje natural."
                 )
-                return await self.send_message(chat_id, response_text)
+                return {
+                    "type": "text_messages",
+                    "messages": [response_text]
+                }
             elif command == '/agregar':
                 return await self._handle_add_to_cart(chat_id, args, db)
             elif command == '/ver_carrito':
@@ -1332,15 +1338,24 @@ Responde en español de manera concisa pero completa.
     async def _handle_add_to_cart(self, chat_id: int, args: List[str], db: Session) -> Dict[str, Any]:
         """Maneja el comando /agregar."""
         if not args:
-            return await self.send_message(chat_id, "Uso: /agregar <SKU> [cantidad]")
+            return {
+                "type": "text_messages",
+                "messages": ["Uso: /agregar <SKU> [cantidad]"]
+            }
         
         sku = args[0]
         try:
             quantity = int(args[1]) if len(args) > 1 else 1
             if quantity <= 0:
-                return await self.send_message(chat_id, "La cantidad debe ser un número positivo.")
+                return {
+                    "type": "text_messages",
+                    "messages": ["La cantidad debe ser un número positivo."]
+                }
         except ValueError:
-            return await self.send_message(chat_id, "La cantidad debe ser un número.")
+            return {
+                "type": "text_messages",
+                "messages": ["La cantidad debe ser un número."]
+            }
 
         try:
             async with self._get_api_client() as client:
@@ -1350,22 +1365,34 @@ Responde en español de manera concisa pero completa.
                 )
                 
                 if response.status_code == 404:
-                    return await self.send_message(chat_id, f"😕 No se encontró ningún producto con el SKU: {sku}")
+                    return {
+                        "type": "text_messages",
+                        "messages": [f"😕 No se encontró ningún producto con el SKU: {sku}"]
+                    }
                 
                 response.raise_for_status()
                 
                 cart_data = response.json()
                 response_text = "✅ *Producto añadido*\n\n"
                 response_text += self._format_cart_data(cart_data)
+                
+                return {
+                    "type": "text_messages",
+                    "messages": [response_text]
+                }
 
         except httpx.HTTPError as e:
             logger.error(f"Error de API al añadir al carrito para chat {chat_id}: {e}")
-            response_text = "Lo siento, ocurrió un error al intentar añadir el producto al carrito."
+            return {
+                "type": "text_messages",
+                "messages": ["Lo siento, ocurrió un error al intentar añadir el producto al carrito."]
+            }
         except Exception as e:
             logger.error(f"Error inesperado al añadir al carrito para chat {chat_id}: {e}")
-            response_text = "Ocurrió un error inesperado. Por favor, intenta de nuevo."
-
-        return await self.send_message(chat_id, response_text)
+            return {
+                "type": "text_messages",
+                "messages": ["Ocurrió un error inesperado. Por favor, intenta de nuevo."]
+            }
 
     async def _handle_view_cart(self, chat_id: int) -> Dict[str, Any]:
         """Maneja el comando /ver_carrito."""
@@ -1375,20 +1402,32 @@ Responde en español de manera concisa pero completa.
                 response.raise_for_status()
                 cart_data = response.json()
                 response_text = self._format_cart_data(cart_data)
+                
+                return {
+                    "type": "text_messages",
+                    "messages": [response_text]
+                }
 
         except httpx.HTTPError as e:
             logger.error(f"Error de API al ver el carrito para chat {chat_id}: {e}")
-            response_text = "Lo siento, ocurrió un error al recuperar tu carrito."
+            return {
+                "type": "text_messages",
+                "messages": ["Lo siento, ocurrió un error al recuperar tu carrito."]
+            }
         except Exception as e:
             logger.error(f"Error inesperado al ver el carrito para chat {chat_id}: {e}")
-            response_text = "Ocurrió un error inesperado. Por favor, intenta de nuevo."
-            
-        return await self.send_message(chat_id, response_text)
+            return {
+                "type": "text_messages",
+                "messages": ["Ocurrió un error inesperado. Por favor, intenta de nuevo."]
+            }
 
     async def _handle_remove_from_cart(self, chat_id: int, args: List[str]) -> Dict[str, Any]:
         """Maneja el comando /eliminar."""
         if not args:
-            return await self.send_message(chat_id, "Uso: /eliminar <SKU>")
+            return {
+                "type": "text_messages",
+                "messages": ["Uso: /eliminar <SKU>"]
+            }
         
         sku = args[0]
         try:
@@ -1401,16 +1440,24 @@ Responde en español de manera concisa pero completa.
                     pass
 
                 response.raise_for_status()
-                response_text = f"🗑️ Producto `{sku}` eliminado del carrito."
+                
+                return {
+                    "type": "text_messages",
+                    "messages": [f"🗑️ Producto `{sku}` eliminado del carrito."]
+                }
 
         except httpx.HTTPError as e:
             logger.error(f"Error de API al eliminar del carrito para chat {chat_id}: {e}")
-            response_text = f"Lo siento, ocurrió un error al intentar eliminar el producto `{sku}`."
+            return {
+                "type": "text_messages",
+                "messages": [f"Lo siento, ocurrió un error al intentar eliminar el producto `{sku}`."]
+            }
         except Exception as e:
             logger.error(f"Error inesperado al eliminar del carrito para chat {chat_id}: {e}")
-            response_text = "Ocurrió un error inesperado. Por favor, intenta de nuevo."
-
-        return await self.send_message(chat_id, response_text)
+            return {
+                "type": "text_messages",
+                "messages": ["Ocurrió un error inesperado. Por favor, intenta de nuevo."]
+            }
 
     async def _handle_clear_cart(self, chat_id: int) -> Dict[str, Any]:
         """Maneja el comando /vaciar_carrito."""
@@ -1423,22 +1470,32 @@ Responde en español de manera concisa pero completa.
                 items_to_delete = cart_data.get("items", {}).keys()
 
                 if not items_to_delete:
-                    return await self.send_message(chat_id, "Tu carrito ya está vacío.")
+                    return {
+                        "type": "text_messages",
+                        "messages": ["Tu carrito ya está vacío."]
+                    }
 
                 # Borramos cada item
                 for sku in items_to_delete:
                     await client.delete(f"/cart/{chat_id}/items/{sku}")
                 
-                response_text = "✅ Tu carrito ha sido vaciado."
+                return {
+                    "type": "text_messages",
+                    "messages": ["✅ Tu carrito ha sido vaciado."]
+                }
 
         except httpx.HTTPError as e:
             logger.error(f"Error de API al vaciar el carrito para chat {chat_id}: {e}")
-            response_text = "Lo siento, ocurrió un error al intentar vaciar tu carrito."
+            return {
+                "type": "text_messages",
+                "messages": ["Lo siento, ocurrió un error al intentar vaciar tu carrito."]
+            }
         except Exception as e:
             logger.error(f"Error inesperado al vaciar el carrito para chat {chat_id}: {e}")
-            response_text = "Ocurrió un error inesperado. Por favor, intenta de nuevo."
-
-        return await self.send_message(chat_id, response_text)
+            return {
+                "type": "text_messages",
+                "messages": ["Ocurrió un error inesperado. Por favor, intenta de nuevo."]
+            }
         
     async def _handle_checkout(self, chat_id: int, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Maneja el comando /finalizar_compra."""
@@ -1449,7 +1506,10 @@ Responde en español de manera concisa pero completa.
                 get_response.raise_for_status()
                 cart_data = get_response.json()
                 if not cart_data.get("items"):
-                    return await self.send_message(chat_id, "Tu carrito está vacío. No puedes finalizar una compra.")
+                    return {
+                        "type": "text_messages",
+                        "messages": ["Tu carrito está vacío. No puedes finalizar una compra."]
+                    }
 
                 # 2. Recopilar datos del cliente (versión simplificada)
                 user = message_data.get("from", {})
@@ -1495,18 +1555,30 @@ Responde en español de manera concisa pero completa.
                     f"   - *Total:* `${total:,.2f}`\n\n"
                     f"Recibirás más detalles en tu correo electrónico (`{customer_email}`)."
                 )
+                
+                return {
+                    "type": "text_messages",
+                    "messages": [response_text]
+                }
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 400:
-                 response_text = "Tu carrito está vacío, no se puede finalizar la compra."
+                return {
+                    "type": "text_messages",
+                    "messages": ["Tu carrito está vacío, no se puede finalizar la compra."]
+                }
             else:
                 logger.error(f"Error de API en checkout para chat {chat_id}: {e}")
-                response_text = "Lo siento, ocurrió un error al procesar tu pedido."
+                return {
+                    "type": "text_messages",
+                    "messages": ["Lo siento, ocurrió un error al procesar tu pedido."]
+                }
         except Exception as e:
             logger.error(f"Error inesperado en checkout para chat {chat_id}: {e}")
-            response_text = "Ocurrió un error inesperado. Por favor, intenta de nuevo."
-
-        return await self.send_message(chat_id, response_text)
+            return {
+                "type": "text_messages",
+                "messages": ["Ocurrió un error inesperado. Por favor, intenta de nuevo."]
+            }
 
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO
