@@ -18,6 +18,7 @@ class Product(Base):
 
     category = relationship("Category", back_populates="products")
     images_association = relationship("ProductImage", back_populates="product", cascade="all, delete-orphan")
+    stock_levels = relationship("Stock", back_populates="product", cascade="all, delete-orphan")
 
     @property
     def images(self):

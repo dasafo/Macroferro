@@ -39,12 +39,28 @@ class CartService:
         # Usamos un hash de Redis. Cada SKU es un campo en el hash.
         # El valor es un JSON con cantidad y los detalles del producto.
         
-        current_quantity = await redis_client.hget(cart_key, product_sku)
-        if current_quantity:
-            quantity += json.loads(current_quantity)['quantity']
+        current_item_json = await redis_client.hget(cart_key, product_sku)
+        
+        if current_item_json:
+            current_item = json.loads(current_item_json)
+            new_quantity = current_item['quantity'] + quantity
+        else:
+            # Si el item es nuevo, y la cantidad es negativa o cero, no hacemos nada
+            if quantity <= 0:
+                return
+            new_quantity = quantity
+
+        # Validación para no permitir cantidades negativas
+        if new_quantity < 0:
+            raise ValueError(f"No puedes eliminar más unidades de las que tienes. Tienes {current_item['quantity']} en el carrito.")
+
+        # Si la nueva cantidad es cero, eliminamos el producto del carrito
+        if new_quantity == 0:
+            await self.remove_product_from_cart(chat_id, product_sku)
+            return
 
         product_data = {
-            "quantity": quantity,
+            "quantity": new_quantity,
             "product": product.model_dump_json() # Usar model_dump_json para Pydantic v2
         }
         

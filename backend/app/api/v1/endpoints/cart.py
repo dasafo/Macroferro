@@ -32,7 +32,10 @@ async def add_item_to_cart(
     # Convertir el modelo de la BD (SQLAlchemy) a un esquema Pydantic
     product_schema = ProductResponse.model_validate(product_db)
 
-    await cart_service.add_product_to_cart(chat_id, product_schema, item.quantity)
+    try:
+        await cart_service.add_product_to_cart(chat_id, product_schema, item.quantity)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     cart_contents = await cart_service.get_cart_contents(chat_id)
     total_price = await cart_service.get_cart_total_price(chat_id)

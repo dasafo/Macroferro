@@ -59,6 +59,8 @@ from app.crud.conversation_crud import (
     set_pending_action, 
     clear_pending_action
 )
+from app.crud.stock_crud import get_total_stock_by_sku, get_stock_by_sku
+from app.db.models.stock_model import Stock, Warehouse
 
 logger = logging.getLogger(__name__)
 
@@ -609,6 +611,9 @@ Ejemplos de cart_action:
 - "Quita 1 guante del carrito" -> cart_action: "remove", cart_quantity: 1, cart_product_reference: "guante"
 - "elimina dos de esos" -> cart_action: "remove", cart_quantity: 2, cart_product_reference: "esos"
 - "saca un adhesivo" -> cart_action: "remove", cart_quantity: 1, cart_product_reference: "un adhesivo"
+- "si añade 3 adhesivos de montaje Facom al carro" -> cart_action: "add", cart_quantity: 3, cart_product_reference: "adhesivos de montaje Facom"
+- "6 de Adhesivo Profesional Hilti" -> cart_action: "add", cart_quantity: 6, cart_product_reference: "Adhesivo Profesional Hilti"
+- "añade 5 guantes mas al carro" -> cart_action: "add", cart_quantity: 5, cart_product_reference: "guantes", "is_update": true
 
 IMPORTANTE para cart_product_reference:
 - Mantén SIEMPRE la referencia en español exactamente como la dice el usuario
@@ -623,6 +628,15 @@ Ejemplos de otros tipos:
 - "Busco tubos de PVC" → product_search  
 - "¿Cuál es el diámetro de ese tubo?" → technical_question
 - "Hola, ¿cómo están?" → general_conversation
+
+IMPORTANTE sobre búsquedas vagas:
+- Si la búsqueda es MUY genérica y podría referirse a cientos de productos (ej: "cosas de metal", "productos", "herramientas"), clasifícalo como "general_conversation" para que el asistente pueda pedir más detalles.
+- Una búsqueda válida debe tener un tipo de producto más o menos claro (ej: "tubos de PVC", "martillos percutores", "pintura para exteriores").
+
+Ejemplos de búsquedas vagas:
+- "tienes cosas de metal?" -> intent_type: "general_conversation"
+- "qué vendes?" -> intent_type: "general_conversation"
+- "dame productos" -> intent_type: "general_conversation"
 """
             
             # Usar gpt-4o-mini para análisis más sofisticado
@@ -651,6 +665,24 @@ Ejemplos de otros tipos:
             intent_type = analysis.get("intent_type", "general_conversation")
             confidence = analysis.get("confidence", 0.5)
             
+            # FORZAR ACLARACIÓN PARA PREGUNTAS VAGAS
+            # Si la IA lo ha clasificado como 'general_conversation' y no es un saludo,
+            # significa que la consulta es demasiado abierta.
+            is_simple_greeting = any(
+                greeting in message_text.lower() 
+                for greeting in ['hola', 'gracias', 'buenos', 'buenas', 'ok', 'vale', 'adios']
+            )
+            
+            if intent_type == "general_conversation" and not is_simple_greeting:
+                logger.info(f"La consulta es demasiado general. Pidiendo aclaración al usuario.")
+                return {
+                    "type": "text_messages",
+                    "messages": [
+                        "🤔 Entendido, pero tu consulta es un poco general.",
+                        "Para poder ayudarte mejor, ¿podrías ser más específico? Por ejemplo, puedes decirme el tipo de producto que buscas (ej: 'tubos de acero', 'tornillos para madera') o la marca."
+                    ]
+                }
+
             # ========================================
             # ENRUTAMIENTO INTELIGENTE SEGÚN INTENCIÓN
             # ========================================
@@ -669,7 +701,7 @@ Ejemplos de otros tipos:
             elif intent_type == "cart_action":
                 return await self._handle_cart_action(db, analysis, message_text, chat_id, message_data)
             
-            else:  # general_conversation
+            else:  # general_conversation (ahora solo para saludos)
                 messages = await self._handle_conversational_response(message_text, analysis)
                 return {"type": "text_messages", "messages": messages}
             
@@ -713,109 +745,61 @@ Ejemplos de otros tipos:
             specific_product = analysis.get("specific_product_mentioned")
             if not specific_product:
                 # Extraer posibles nombres de productos del mensaje
-                # Buscar palabras clave de productos comunes
                 search_terms = analysis.get("search_terms", [])
                 if not search_terms:
                     search_terms = [message_text]
             else:
                 search_terms = [specific_product]
             
-            logger.info(f"Buscando producto específico: {search_terms}")
+            query_text = " ".join(search_terms)
+            logger.info(f"Buscando producto específico: {query_text}")
+
+            # La resolución ahora se hace en _resolve_product_reference
+            product_sku = await self._resolve_product_reference(db, query_text, chat_id, action_context='search')
             
-            # 1. Intentar búsqueda exacta por SKU primero
-            product = None
-            for term in search_terms:
-                # Intentar como SKU
-                product = get_product_by_sku(db, term.upper())
-                if product:
-                    break
-                    
-                # Intentar búsqueda exacta por nombre
-                products = get_products(db, name_like=term, limit=5)
-                if products:
-                    # Buscar coincidencia exacta
-                    for p in products:
-                        if p.name.lower() == term.lower():
-                            product = p
-                            break
-                    
-                    # Si no hay coincidencia exacta, tomar el primer resultado si es similar
-                    if not product and products:
-                        # Verificar si el primer resultado es suficientemente similar
-                        first_product = products[0]
-                        if term.lower() in first_product.name.lower() or first_product.name.lower() in term.lower():
-                            product = first_product
-                
-                if product:
-                    break
-            
-            # 2. Si no encontramos producto por búsqueda directa, usar búsqueda semántica
-            if not product:
-                logger.info("No se encontró producto directo, usando búsqueda semántica")
-                search_results = await self.product_service.search_products(
-                    db=db,
-                    query_text=message_text,
-                    top_k=3
-                )
-                
-                main_products = search_results.get("main_results", [])
-                if main_products:
-                    # Solo tomar el mejor resultado si tiene alta similitud
-                    product = main_products[0]
-                    logger.info(f"Producto encontrado por búsqueda semántica: {product.name}")
-            
-            if product:
+            if product_sku:
+                product = get_product_by_sku(db, product_sku)
                 # Registrar producto como visto recientemente
                 add_recent_product(db, chat_id, product.sku)
                 
-                # Generar respuesta detallada con imagen
-                product_response = await self._generate_detailed_product_response(product, message_text)
+                # Generar respuesta detallada con imagen y stock
+                product_response = await self._generate_detailed_product_response(product, message_text, db)
                 
                 return {
                     "type": "product_with_image",
                     "product": product,
                     "caption": product_response["caption"],
                     "additional_messages": product_response["additional_messages"],
-                    "messages": []  # No usado para este tipo
+                    "messages": []
                 }
             else:
-                # No se encontró producto específico
+                # No se encontró producto específico - Mensaje mejorado
                 return {
                     "type": "text_messages",
                     "messages": [
-                        f"🔍 Busqué información específica sobre: *{message_text}*",
-                        "❌ No pude encontrar ese producto específico en nuestro catálogo.",
-                        "💡 Intenta con:",
-                        "• Nombre más específico o marca del producto",
-                        "• Código SKU si lo tienes",
-                        "• Categoría general (ej: 'herramientas', 'tubos', 'válvulas')",
-                        "🛠️ ¿Te puedo ayudar con alguna búsqueda más general?"
-                    ],
-                    "product": None,
-                    "caption": "",
-                    "additional_messages": []
+                        f"🤔 Lo siento, no he podido encontrar un producto que coincida exactamente con '{message_text}'.",
+                        "Podrías intentar reformular tu pregunta de una manera más específica, por ejemplo, mencionando la marca o el tipo de producto que buscas.",
+                        "También puedes probar con una búsqueda más general, como 'herramientas para construcción' o 'válvulas de PVC'."
+                    ]
                 }
-            
+                
         except Exception as e:
             logger.error(f"Error en consulta específica de producto: {e}")
             return {
                 "type": "text_messages",
-                "messages": ["❌ Hubo un error buscando ese producto. ¿Puedes intentar de nuevo?"],
-                "product": None,
-                "caption": "",
-                "additional_messages": []
+                "messages": ["❌ Hubo un error buscando ese producto. ¿Puedes intentar de nuevo?"]
             }
 
-    async def _generate_detailed_product_response(self, product, original_question: str) -> Dict[str, Any]:
+    async def _generate_detailed_product_response(self, product, original_question: str, db: Session) -> Dict[str, Any]:
         """
         Genera una respuesta conversacional y detallada sobre un producto específico.
-        
         Ahora retorna un diccionario con el caption para la imagen y mensajes adicionales
         para crear una experiencia visual rica con la foto del producto.
-        
-        Returns:
-            Dict con 'caption' para la imagen y 'additional_messages' para envío secuencial
         """
+        # Obtener información del stock
+        total_stock = get_total_stock_by_sku(db, product.sku)
+        stock_status = self._get_stock_status(total_stock)
+
         # Preparar información del producto para el LLM
         product_info = {
             "sku": product.sku,
@@ -824,6 +808,7 @@ Ejemplos de otros tipos:
             "price": float(product.price),
             "brand": product.brand or "Sin marca especificada",
             "category": product.category.name if product.category else "Sin categoría",
+            "stock_status": stock_status, # Nuevo campo de stock
             "specifications": product.spec_json or {}
         }
         
@@ -842,6 +827,7 @@ PRODUCTO ENCONTRADO:
 - Precio: ${product_info['price']:,.2f}
 - Marca: {product_info['brand']}
 - Categoría: {product_info['category']}
+- Stock: {product_info['stock_status']}
 - Especificaciones técnicas: {json.dumps(product_info['specifications'], indent=2, ensure_ascii=False)}
 
 INSTRUCCIONES:
@@ -849,9 +835,9 @@ Vas a enviar la información en dos partes:
 
 1. CAPTION DE IMAGEN (máximo 800 caracteres):
    - Información básica y atractiva del producto
+   - INCLUYE SIEMPRE el estado del stock de forma prominente.
    - Incluye nombre, precio, marca de forma visual
-   - Usa emojis apropiados
-   - Debe ser conciso pero informativo
+   - Usa emojis apropiados (ej: ✅, ⚠️, ❌ para el stock)
 
 2. MENSAJES ADICIONALES (separa con "|||"):
    - Detalles técnicos específicos
@@ -969,79 +955,49 @@ Responde en español de manera profesional y útil.
             # Mover todos los productos a la lista de relacionados y limpiar los principales
             related_products = main_products + related_products
             main_products = []
-
-        # Comprobar si hay resultados principales. Si no, ajustar el mensaje.
-        if not main_products and related_products:
-            # No hay resultados principales, pero sí relacionados
-            initial_message = f"🤔 No encontré resultados exactos para *{search_query}*, pero esto podría interesarte:"
-            messages.append(initial_message)
-            
-            # Registrar productos relacionados como vistos recientemente
-            for product in related_products:
-                add_recent_product(db, chat_id, product.sku)
-            
-            # Formatear los productos relacionados como si fueran principales
-            for i, product in enumerate(related_products, 1):
-                product_message = f"*{i}. {product.name}*\n"
-                if product.description:
-                    desc = product.description[:120] + "..." if len(product.description) > 120 else product.description
-                    product_message += f"📝 {desc}\n\n"
-                product_message += f"💰 Precio: *${product.price:,.0f}*\n"
-                if product.category:
-                    product_message += f"🏷️ {product.category.name}\n"
-                if hasattr(product, 'brand') and product.brand:
-                    product_message += f"🏭 {product.brand}\n"
-                messages.append(product_message)
-
-        elif main_products:
-            # Hay resultados principales, proceder como antes.
-            initial_message = f"🔍 ¡Perfecto! Encontré varios productos para tu búsqueda de *{search_query}*.\n\n✨ Aquí están las mejores opciones:"
-            messages.append(initial_message)
-            
-            # Registrar productos principales como vistos recientemente
-            for product in main_products:
-                add_recent_product(db, chat_id, product.sku)
-            
-            # Mostrar productos principales
-            for i, product in enumerate(main_products, 1):
-                product_message = f"*{i}. {product.name}*\n"
-                if product.description:
-                    desc = product.description[:120] + "..." if len(product.description) > 120 else product.description
-                    product_message += f"📝 {desc}\n\n"
-                product_message += f"💰 Precio: *${product.price:,.0f}*\n"
-                if product.category:
-                    product_message += f"🏷️ {product.category.name}\n"
-                if hasattr(product, 'brand') and product.brand:
-                    product_message += f"🏭 {product.brand}\n"
-                if product.spec_json:
-                    specs_preview = []
-                    for key, value in list(product.spec_json.items())[:2]:
-                        specs_preview.append(f"• {key}: {value}")
-                    if specs_preview:
-                        product_message += f"⚙️ Especificaciones:\n" + "\n".join(specs_preview) + "\n"
-                messages.append(product_message)
-
-            # Mostrar productos relacionados si también existen
-            if related_products:
-                # Registrar productos relacionados como vistos recientemente
-                for product in related_products:
-                    add_recent_product(db, chat_id, product.sku)
-                    
-                related_message = "\n🔗 *También podrían interesarte:*"
-                for product in related_products:
-                    related_message += f"\n• *{product.name}* - ${product.price:,.0f}"
-                messages.append(related_message)
         
-        # Si después de toda la lógica, la lista de mensajes solo tiene el saludo inicial (o está vacía),
-        # significa que no se añadieron productos. Esto previene enviar un mensaje vacío o solo el saludo.
-        if len(messages) <= 1 and not main_products and not related_products:
+        # Unificar todos los productos en una sola lista para simplificar la presentación
+        all_products = main_products + related_products
+        
+        # Eliminar duplicados por SKU, manteniendo el primero que aparece
+        unique_products = []
+        seen_skus = set()
+        for product in all_products:
+            if product.sku not in seen_skus:
+                unique_products.append(product)
+                seen_skus.add(product.sku)
+
+        # Comprobar si hay resultados.
+        if not unique_products:
              return [
                 f"🔍 Busqué productos para: *{search_query}*",
                 "❌ No encontré ningún producto que coincida con tu búsqueda.\n\n💡 Intenta con otros términos o sé más general."
             ]
 
+        # Formatear la respuesta
+        initial_message = f"🔍 ¡Perfecto! Encontré estos productos para tu búsqueda de *{search_query}*:"
+        messages.append(initial_message)
+        
+        # Registrar productos como vistos recientemente
+        for product in unique_products:
+            add_recent_product(db, chat_id, product.sku)
+        
+        # Mostrar productos
+        for i, product in enumerate(unique_products, 1):
+            product_message = f"*{i}. {product.name}*\n"
+            if product.description:
+                desc = product.description[:120] + "..." if len(product.description) > 120 else product.description
+                product_message += f"📝 {desc}\n"
+            product_message += f"💰 Precio: *${product.price:,.0f}*\n"
+            if product.category:
+                product_message += f"🏷️ {product.category.name}\n"
+            if hasattr(product, 'brand') and product.brand:
+                product_message += f"🏭 {product.brand}\n"
+            
+            messages.append(product_message)
+
         # Mensaje final conversacional
-        follow_up = "💬 ¿Te interesa conocer más detalles de alguno de estos productos?"
+        follow_up = "\n💬 ¿Te interesa conocer más detalles de alguno de estos productos?"
         messages.append(follow_up)
         
         return messages
@@ -1722,19 +1678,28 @@ Responde en español de manera concisa pero completa.
             except (ValueError, TypeError):
                 quantity = 1
         
+        is_update_request = analysis.get("is_update", False)
+        action_context = 'update' if is_update_request else 'add'
+
         # Resolver la referencia del producto a un SKU
         if product_reference:
-            sku = await self._resolve_product_reference(db, product_reference, chat_id)
+            sku = await self._resolve_product_reference(db, product_reference, chat_id, action_context=action_context)
             if not sku:
+                # Mensaje de error específico si se intentaba actualizar algo que no está en el carro
+                if is_update_request:
+                    return {
+                        "type": "text_messages",
+                        "messages": [f"🤔 No encontré '{product_reference}' en tu carrito para añadir más. ¿Quizás quisiste decir otro producto?"]
+                    }
                 return {
                     "type": "text_messages",
                     "messages": [f"🤔 No pude identificar qué producto quieres agregar: '{product_reference}'. ¿Podrías ser más específico o usar el SKU del producto?"]
                 }
         else:
             # Si no hay referencia específica, intentar usar el producto más reciente
-            recent_products = get_recent_products(db, chat_id)
-            if recent_products:
-                sku = recent_products[0]
+            recent_products_skus = get_recent_products(db, chat_id)
+            if recent_products_skus:
+                sku = recent_products_skus[0] # Se asume el más reciente
             else:
                 return {
                     "type": "text_messages",
@@ -1757,7 +1722,7 @@ Responde en español de manera concisa pero completa.
                 "messages": ["🤔 No pude identificar qué producto quieres quitar. Por favor, sé más específico."]
             }
             
-        sku = await self._resolve_product_reference(db, product_reference, chat_id)
+        sku = await self._resolve_product_reference(db, product_reference, chat_id, action_context='remove')
         if not sku:
             return {
                 "type": "text_messages",
@@ -1813,92 +1778,108 @@ Responde en español de manera concisa pero completa.
             # Si no se especifica cantidad, eliminar el producto completo
             return await self._handle_remove_from_cart(chat_id, [sku])
 
-    async def _resolve_product_reference(self, db: Session, reference: str, chat_id: int) -> str:
+    async def _resolve_product_reference(self, db: Session, reference: str, chat_id: int, action_context: str = 'search') -> str:
         """
-        Resuelve una referencia de producto a un SKU específico.
-        Primero busca en el contexto del usuario (carrito + recientes) y si no encuentra,
-        realiza una nueva búsqueda semántica.
+        Resuelve una referencia de producto a un SKU. La estrategia cambia según el contexto de la acción.
+        - 'remove'/'update': Busca la referencia EXCLUSIVAMENTE dentro del carrito.
+        - 'add': Busca primero en el contexto (carrito + recientes) para resolver referencias relativas, luego semánticamente.
+        - 'search': Busca en el contexto de productos recientes y luego semánticamente.
         """
         if not reference:
             return ""
 
-        # 1. Obtener productos del contexto (carrito y recientes)
+        candidates = []
+        
+        # --- PASO 1: Obtener el contexto del carrito y productos recientes ---
         cart_skus = []
         try:
             async with self._get_api_client() as client:
                 response = await client.get(f"/cart/{chat_id}")
                 if response.status_code == 200:
-                    cart_data = response.json()
-                    cart_skus = list(cart_data.get("items", {}).keys())
+                    cart_skus = list(response.json().get("items", {}).keys())
         except Exception as e:
             logger.error(f"No se pudo obtener el carrito para resolver referencia: {e}")
 
         recent_skus = get_recent_products(db, chat_id, limit=15)
-        product_skus_to_check = cart_skus + [sku for sku in recent_skus if sku not in cart_skus]
         
-        # 2. Buscar coincidencias en el contexto
-        context_candidates = []
-        if product_skus_to_check:
-            for sku in product_skus_to_check:
+        # --- PASO 2: Determinar el alcance de la búsqueda según el contexto de la acción ---
+        skus_to_check_in_context = []
+        if action_context in ['remove', 'update']:
+            # Para quitar o actualizar, SOLO nos importa lo que hay en el carrito.
+            skus_to_check_in_context = cart_skus
+            if not cart_skus:
+                logger.warning(f"Intento de '{action_context}' en un carrito vacío para referencia: '{reference}'")
+                return ""
+        elif action_context == 'add':
+            # Para añadir, consideramos el carrito (para referencias como "ese") y los productos recientes.
+            skus_to_check_in_context = cart_skus + [sku for sku in recent_skus if sku not in cart_skus]
+        elif action_context == 'search':
+            # Para una búsqueda pura, solo nos importa el contexto reciente.
+            skus_to_check_in_context = recent_skus
+
+        # --- PASO 3: Buscar coincidencias en el contexto determinado ---
+        if skus_to_check_in_context:
+            for sku in skus_to_check_in_context:
                 product = db.query(Product).filter(Product.sku == sku).first()
                 if product and self._matches_reference(product, reference):
-                    context_candidates.append(product)
-        
-        # 3. Si hay candidatos del contexto, resolver la ambigüedad y devolver
-        if context_candidates:
-            logger.info(f"Referencia '{reference}' encontrada en contexto del usuario.")
-            return self._resolve_ambiguous_reference(context_candidates, reference)
-        
-        # 4. Si no hay contexto, buscar producto por la referencia como una nueva búsqueda
-        logger.info(f"Referencia '{reference}' no encontrada en contexto, realizando búsqueda semántica.")
-        try:
-            search_results = await self.product_service.search_products(
-                db=db,
-                query_text=reference,
-                top_k=3  # Obtener algunos para la desambiguación
-            )
-            
-            search_candidates = search_results.get("main_results", [])
-            if search_candidates:
-                logger.info(f"Referencia '{reference}' encontrada mediante búsqueda semántica.")
-                return self._resolve_ambiguous_reference(search_candidates, reference)
+                    if not any(p.sku == product.sku for p in candidates):
+                        candidates.append(product)
 
-        except Exception as e:
-            logger.error(f"Error durante búsqueda semántica para resolver referencia: {e}")
+        # --- PASO 4: Si no hay candidatos, realizar búsqueda semántica (no aplica a remove/update) ---
+        if not candidates and action_context not in ['remove', 'update']:
+            logger.info(f"Referencia '{reference}' no encontrada en contexto. Realizando búsqueda semántica.")
+            search_results = await self.product_service.search_products(db, reference, top_k=5)
+            main_results = search_results.get("main_results", [])
+            for p_schema in main_results:
+                product = get_product_by_sku(db, p_schema.sku)
+                if product and self._matches_reference(product, reference):
+                    if not any(p.sku == product.sku for p in candidates):
+                        candidates.append(product)
+        
+        # --- PASO 5: Resolver ambigüedad y devolver el mejor resultado ---
+        if not candidates:
+            logger.warning(f"No se pudo resolver la referencia a producto para '{reference}' (contexto: {action_context}).")
+            return ""
+        
+        return self._resolve_ambiguous_reference(candidates, reference)
 
-        logger.warning(f"No se pudo resolver la referencia de producto: '{reference}'")
-        return ""
-    
-    def _resolve_ambiguous_reference(self, candidates: List, reference: str) -> str:
+    def _resolve_ambiguous_reference(self, candidates: List[Product], reference: str) -> str:
         """
         Resuelve referencias ambiguas cuando hay múltiples productos que coinciden.
-        Aplica criterios inteligentes para elegir el más apropiado.
+        Aplica un sistema de puntuación para elegir el más apropiado.
         """
         reference_lower = reference.lower()
+        reference_words = set([word for word in reference_lower.split() 
+                               if word not in ["el", "la", "los", "las", "de", "del", "para", "con", "sin"]])
+
+        if not candidates:
+            return ""
+
+        scored_candidates = []
+        for product in candidates:
+            score = 0
+            product_text = f"{product.name} {product.description or ''} {product.brand or ''}".lower()
+            
+            # Calcular puntuación de coincidencia
+            for word in reference_words:
+                if word in product_text:
+                    score += 1
+            
+            # Bonificación por coincidencia de marca si se menciona explícitamente
+            if product.brand and product.brand.lower() in reference_words:
+                score += 2
+            
+            scored_candidates.append({"product": product, "score": score, "price": product.price})
+
+        # Si no hay coincidencias, no podemos resolver la referencia
+        if not any(c['score'] > 0 for c in scored_candidates):
+            return ""
+
+        # Ordenar candidatos: primero por puntuación (desc), luego por precio (desc)
+        candidates_sorted = sorted(scored_candidates, key=lambda x: (x['score'], x['price']), reverse=True)
         
-        # Criterio 1: Si la referencia incluye palabras clave específicas
-        specific_terms = {
-            "percutor": ["percutor", "hammer", "rotomartillo"],
-            "compacto": ["compacto", "mini", "pequeño", "ligero"],
-            "profesional": ["profesional", "pro", "industrial", "heavy"],
-            "básico": ["básico", "simple", "económico", "barato"]
-        }
-        
-        for term_type, keywords in specific_terms.items():
-            for keyword in keywords:
-                if keyword in reference_lower:
-                    # Buscar el producto que mejor coincida con esta característica
-                    for candidate in candidates:
-                        if keyword in candidate.name.lower() or keyword in (candidate.description or "").lower():
-                            return candidate.sku
-        
-        # Criterio 2: Si no hay términos específicos, priorizar por precio (más caro = más profesional)
-        # Esto asume que cuando alguien dice "el taladro Hilti" sin más especificidad,
-        # probablemente se refiere al modelo principal/profesional
-        candidates_sorted = sorted(candidates, key=lambda x: x.price, reverse=True)
-        
-        # Devolver el más caro (generalmente el modelo principal/profesional)
-        return candidates_sorted[0].sku
+        # Devolver el SKU del mejor candidato
+        return candidates_sorted[0]['product'].sku
     
     def _matches_reference(self, product, reference: str) -> bool:
         """
@@ -1939,6 +1920,15 @@ Responde en español de manera concisa pero completa.
         
         return matches >= required_matches
 
+    def _get_stock_status(self, total_quantity: int) -> str:
+        """Determina el estado del stock basado en la cantidad total."""
+        if total_quantity > 20:
+            return "✅ En Stock"
+        elif 1 <= total_quantity <= 20:
+            return "⚠️ Bajo Stock (¡quedan pocas unidades!)"
+        else:
+            return "❌ Agotado"
+
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO
 # ========================================
@@ -1946,57 +1936,3 @@ Responde en español de manera concisa pero completa.
 # Instancia única del servicio para ser usada en toda la aplicación
 # Se crea solo si el token del bot está configurado para evitar errores en desarrollo
 telegram_service = TelegramBotService() if settings.telegram_bot_token else None
-
-# ========================================
-# EXTENSIONES Y MÉTODOS AUXILIARES FUTUROS
-# ========================================
-
-# Métodos auxiliares que se implementarían en versiones futuras:
-#
-# async def _validate_user_permissions(self, user_id: int, chat_id: int) -> bool:
-#     """Valida permisos del usuario para acceder a funcionalidades específicas."""
-#     pass
-#
-# async def _log_user_interaction(self, user_id: int, message_text: str, response_text: str) -> None:
-#     """Registra interacciones para análisis de uso y mejora del bot."""
-#     pass
-#
-# async def _get_user_context(self, db: Session, user_id: int) -> Dict[str, Any]:
-#     """Obtiene contexto conversacional persistente del usuario."""
-#     pass
-#
-# async def _save_user_context(self, db: Session, user_id: int, context: Dict[str, Any]) -> None:
-#     """Guarda contexto conversacional para futuras interacciones."""
-#     pass
-#
-# async def _generate_product_recommendations(self, db: Session, user_id: int) -> List[models.Product]:
-#     """Genera recomendaciones personalizadas basadas en historial del usuario."""
-#     pass
-#
-# async def _format_product_details(self, product: models.Product) -> str:
-#     """Formatea detalles completos de un producto para visualización rica."""
-#     pass
-#
-# async def _handle_product_inquiry(self, db: Session, product_sku: str, user_id: int) -> str:
-#     """Maneja consultas específicas sobre un producto (precio, stock, especificaciones)."""
-#     pass
-#
-# async def _send_typing_action(self, chat_id: int) -> None:
-#     """Envía acción de 'escribiendo...' para mejor UX durante procesamiento."""
-#     pass
-#
-# async def _create_inline_keyboard(self, options: List[Dict[str, str]]) -> Dict[str, Any]:
-#     """Crea teclado inline con botones para navegación interactiva."""
-#     pass
-#
-# async def _handle_callback_query(self, callback_data: str, chat_id: int) -> str:
-#     """Procesa respuestas de botones inline del usuario."""
-#     pass
-#
-# async def _validate_webhook_secret(self, request_headers: Dict[str, str]) -> bool:
-#     """Valida que el webhook viene realmente de Telegram usando el secret token."""
-#     pass
-#
-# async def _retry_failed_message(self, chat_id: int, text: str, max_retries: int = 3) -> bool:
-#     """Reintenta envío de mensajes fallidos con backoff exponencial."""
-#     pass 
