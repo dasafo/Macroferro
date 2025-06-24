@@ -137,7 +137,7 @@ class TelegramBotService:
     # COMUNICACIÓN CON TELEGRAM API
     # ========================================
     
-    async def send_message(self, chat_id: int, text: str, parse_mode: str = "Markdown") -> Dict[str, Any]:
+    async def send_message(self, chat_id: int, text: str, parse_mode: str = "Markdown", reply_markup: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Envía un mensaje a un chat específico a través del API de Telegram.
         
@@ -149,6 +149,7 @@ class TelegramBotService:
             chat_id: ID único del chat donde enviar el mensaje
             text: Contenido del mensaje (puede incluir Markdown/HTML)
             parse_mode: Formato del texto ("Markdown", "HTML", o None)
+            reply_markup: Teclado interactivo para adjuntar al mensaje (opcional)
             
         Returns:
             Respuesta JSON del API de Telegram con detalles del mensaje enviado
@@ -188,6 +189,8 @@ class TelegramBotService:
             "text": text,
             "parse_mode": parse_mode
         }
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -208,7 +211,7 @@ class TelegramBotService:
             logger.error(f"Error inesperado enviando mensaje de Telegram a chat {chat_id}: {e}")
             raise
 
-    async def send_photo(self, chat_id: int, photo_url: str, caption: str = "", parse_mode: str = "Markdown") -> Dict[str, Any]:
+    async def send_photo(self, chat_id: int, photo_url: str, caption: str = "", parse_mode: str = "Markdown", reply_markup: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Envía una foto a un chat específico a través del API de Telegram.
         
@@ -220,6 +223,7 @@ class TelegramBotService:
             photo_url: URL de la imagen a enviar (debe ser accesible públicamente)
             caption: Texto descriptivo de la imagen (opcional, máximo 1024 caracteres)
             parse_mode: Formato del caption ("Markdown", "HTML", o None)
+            reply_markup: Teclado interactivo para adjuntar al mensaje (opcional)
             
         Returns:
             Respuesta JSON del API de Telegram con detalles de la foto enviada
@@ -261,9 +265,11 @@ class TelegramBotService:
             "caption": caption,
             "parse_mode": parse_mode
         }
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         
         try:
-            async with httpx.AsyncClient(timeout=45.0) as client:  # Timeout más largo para imágenes
+            async with httpx.AsyncClient(timeout=60.0) as client:  # Mayor timeout para imágenes
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
                 
@@ -287,7 +293,7 @@ class TelegramBotService:
 
     async def send_multiple_messages(self, chat_id: int, messages: List[str], delay_between_messages: float = 1.0) -> List[Dict[str, Any]]:
         """
-        Envía múltiples mensajes de forma secuencial con delay entre cada uno.
+        Envía una secuencia de mensajes a un chat con un retraso natural.
         
         Esta función simula una conversación natural enviando mensajes en secuencia
         con pausas para que parezca que la persona está escribiendo cada respuesta.
@@ -300,104 +306,54 @@ class TelegramBotService:
         Returns:
             Lista con las respuestas del API de Telegram para cada mensaje
         """
-        results = []
-        
+        sent_messages = []
         for i, message in enumerate(messages):
-            if i > 0:  # No hacer delay antes del primer mensaje
-                await asyncio.sleep(delay_between_messages)
-            
             try:
-                result = await self.send_message(chat_id, message)
-                results.append(result)
-                logger.info(f"Mensaje {i+1}/{len(messages)} enviado exitosamente")
+                sent_message = await self.send_message(chat_id, message)
+                sent_messages.append(sent_message)
+                if i < len(messages) - 1:
+                    await asyncio.sleep(delay_between_messages)
             except Exception as e:
-                logger.error(f"Error enviando mensaje {i+1}/{len(messages)}: {e}")
-                # Continuar con los siguientes mensajes aunque uno falle
-                results.append({"error": str(e)})
+                logger.error(f"Error enviando mensaje múltiple (mensaje {i+1}) a chat {chat_id}: {e}")
+                # Continuar con el siguiente mensaje
+        return sent_messages
         
-        return results
+    async def send_product_with_image(self, chat_id: int, product, caption: str, additional_messages: List[str] = None, delay_between_messages: float = 1.5, reply_markup: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """
+        Envía un producto con su imagen principal, caption y mensajes adicionales.
+        """
+        responses = []
+        photo_url = product.images[0].url if product.images else None
 
-    async def send_product_with_image(self, chat_id: int, product, caption: str, additional_messages: List[str] = None, delay_between_messages: float = 1.5) -> List[Dict[str, Any]]:
-        """
-        Envía información de un producto con su imagen (si está disponible) seguido de mensajes adicionales.
-        
-        Esta función coordina el envío de fotos de productos con información detallada,
-        creando una experiencia visual rica para consultas específicas de productos.
-        
-        Args:
-            chat_id: ID del chat donde enviar la información
-            product: Objeto Product con relaciones cargadas (categoría, imágenes)
-            caption: Texto para acompañar la imagen (información básica del producto)
-            additional_messages: Lista de mensajes adicionales a enviar después de la foto
-            delay_between_messages: Tiempo en segundos entre mensajes
-            
-        Returns:
-            Lista con las respuestas del API de Telegram para cada envío
-            
-        Flujo de envío:
-        1. Si el producto tiene imagen: envía foto con caption
-        2. Si no tiene imagen: envía mensaje de texto con información básica
-        3. Envía mensajes adicionales con delay para simular conversación natural
-        
-        Manejo de imágenes:
-        - Prioriza la primera imagen asociada al producto
-        - Fallback graceful si la imagen no está disponible o falla
-        - Caption limitado a 1024 caracteres (límite de Telegram)
-        """
-        results = []
-        
-        # Verificar si el producto tiene imágenes asociadas
-        has_image = False
-        image_url = None
-        
-        if hasattr(product, 'images_association') and product.images_association:
-            # Obtener la primera imagen asociada
-            first_image_association = product.images_association[0]
-            if hasattr(first_image_association, 'image') and first_image_association.image:
-                image_url = str(first_image_association.image.url)
-                has_image = True
-                logger.info(f"Producto {product.sku} tiene imagen: {image_url}")
-        
-        # Limitar el caption a 1024 caracteres (límite de Telegram para fotos)
-        truncated_caption = caption[:1020] + "..." if len(caption) > 1024 else caption
-        
-        try:
-            if has_image and image_url:
-                # Enviar foto con caption
-                result = await self.send_photo(chat_id, image_url, truncated_caption)
-                results.append(result)
-                logger.info(f"Foto del producto {product.sku} enviada exitosamente")
-            else:
-                # Fallback: enviar como mensaje de texto si no hay imagen
-                result = await self.send_message(chat_id, caption)
-                results.append(result)
-                logger.info(f"Información del producto {product.sku} enviada como texto (sin imagen)")
-                
-        except Exception as e:
-            logger.error(f"Error enviando foto del producto {product.sku}: {e}")
-            # Fallback: enviar como mensaje de texto
+        if photo_url:
             try:
-                result = await self.send_message(chat_id, caption)
-                results.append(result)
-                logger.info(f"Enviado como texto después de fallo de imagen para producto {product.sku}")
-            except Exception as text_error:
-                logger.error(f"Error enviando fallback de texto para producto {product.sku}: {text_error}")
-                results.append({"error": str(text_error)})
-        
-        # Enviar mensajes adicionales con delay
+                photo_response = await self.send_photo(chat_id, photo_url, caption, reply_markup=reply_markup)
+                responses.append(photo_response)
+            except Exception as e:
+                logger.error(f"Error enviando foto del producto {product.sku} a chat {chat_id}: {e}")
+                try:
+                    caption_response = await self.send_message(chat_id, caption, reply_markup=reply_markup)
+                    responses.append(caption_response)
+                except Exception as e_text:
+                    logger.error(f"Fallo al enviar caption como texto para producto {product.sku}: {e_text}")
+        else:
+            try:
+                caption_response = await self.send_message(chat_id, caption, reply_markup=reply_markup)
+                responses.append(caption_response)
+            except Exception as e:
+                logger.error(f"Error enviando caption sin foto para producto {product.sku}: {e}")
+
         if additional_messages:
             for i, message in enumerate(additional_messages):
                 await asyncio.sleep(delay_between_messages)
-                
                 try:
                     result = await self.send_message(chat_id, message)
-                    results.append(result)
-                    logger.info(f"Mensaje adicional {i+1}/{len(additional_messages)} enviado para producto {product.sku}")
+                    responses.append(result)
                 except Exception as e:
                     logger.error(f"Error enviando mensaje adicional {i+1} para producto {product.sku}: {e}")
-                    results.append({"error": str(e)})
+                    responses.append({"error": str(e)})
         
-        return results
+        return responses
 
     def split_response_into_messages(self, response_text: str, max_length: int = 4000) -> List[str]:
         """
@@ -466,14 +422,23 @@ class TelegramBotService:
     
     async def process_message(self, db: Session, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Procesa un mensaje entrante de Telegram, orquestando análisis de IA,
-        búsqueda de productos y generación de respuestas.
-
-        Este es el método central del servicio que maneja el webhook.
+        Procesa un mensaje entrante de Telegram, orquestando análisis de IA y respuestas.
+        Esta es la función principal que maneja toda la lógica del bot.
         """
-        message_text = message_data.get("text", "")
-        chat_id = message_data["chat"]["id"]
+        # Primero, verificar si es un callback de un botón
+        if 'callback_query' in message_data:
+            return await self._handle_callback_query(db, message_data['callback_query'])
 
+        # Si no, procesar como un mensaje normal o editado
+        message = message_data.get('message') or message_data.get('edited_message')
+
+        if not message:
+            logger.warning(f"Update recibido sin contenido procesable (message/callback). Keys: {list(message_data.keys())}. Ignorando.")
+            return {"status": "ignored", "reason": "unhandled_update_type"}
+
+        message_text = message.get("text", "")
+        chat_id = message["chat"]["id"]
+        
         # 1. Manejo de comandos directos (sin IA)
         if message_text.startswith('/'):
             parts = message_text.split()
@@ -735,67 +700,51 @@ Ejemplos de búsquedas vagas:
         return content.strip()
 
     async def _handle_specific_product_inquiry(self, db: Session, analysis: Dict, message_text: str, chat_id: int) -> Dict[str, Any]:
-        """
-        Maneja consultas sobre productos específicos con búsqueda inteligente.
+        """Maneja consultas sobre un producto específico identificado por IA."""
+        logger.info(f"Análisis de OpenAI para consulta específica: {analysis}")
         
-        Returns:
-            Dict con tipo, producto y mensajes estructurados para el envío
-        """
-        try:
-            specific_product = analysis.get("specific_product_mentioned")
-            if not specific_product:
-                # Extraer posibles nombres de productos del mensaje
-                search_terms = analysis.get("search_terms", [])
-                if not search_terms:
-                    search_terms = [message_text]
-            else:
-                search_terms = [specific_product]
-            
-            query_text = " ".join(search_terms)
-            logger.info(f"Buscando producto específico: {query_text}")
-
-            # La resolución ahora se hace en _resolve_product_reference
-            product_sku = await self._resolve_product_reference(db, query_text, chat_id, action_context='search')
-            
-            if product_sku:
-                product = get_product_by_sku(db, product_sku)
-                # Registrar producto como visto recientemente
-                add_recent_product(db, chat_id, product.sku)
-                
-                # Generar respuesta detallada con imagen y stock
-                product_response = await self._generate_detailed_product_response(product, message_text, db)
-                
-                return {
-                    "type": "product_with_image",
-                    "product": product,
-                    "caption": product_response["caption"],
-                    "additional_messages": product_response["additional_messages"],
-                    "messages": []
-                }
-            else:
-                # No se encontró producto específico - Mensaje mejorado
-                return {
-                    "type": "text_messages",
-                    "messages": [
-                        f"🤔 Lo siento, no he podido encontrar un producto que coincida exactamente con '{message_text}'.",
-                        "Podrías intentar reformular tu pregunta de una manera más específica, por ejemplo, mencionando la marca o el tipo de producto que buscas.",
-                        "También puedes probar con una búsqueda más general, como 'herramientas para construcción' o 'válvulas de PVC'."
-                    ]
-                }
-                
-        except Exception as e:
-            logger.error(f"Error en consulta específica de producto: {e}")
+        # Extraer el SKU del producto de la consulta
+        product_reference = analysis.get('product_reference', message_text)
+        sku = await self._resolve_product_reference(db, product_reference, chat_id, action_context='product_inquiry')
+        
+        if not sku:
+            # Si no se pudo resolver, devolver un mensaje de texto claro al usuario.
             return {
                 "type": "text_messages",
-                "messages": ["❌ Hubo un error buscando ese producto. ¿Puedes intentar de nuevo?"]
+                "messages": [
+                    f"🤔 No estoy seguro de a qué producto te refieres con \"{product_reference}\".",
+                    "Para darte la información correcta, ¿podrías ser un poco más específico? Intenta incluir la marca, el modelo o alguna característica clave."
+                ]
             }
 
+        # Obtener el producto de la base de datos
+        product = get_product_by_sku(db, sku=sku)
+        if not product:
+            return {
+                "type": "text_messages",
+                "messages": [f"No encontré ningún producto con la referencia '{sku}'. ¿Podrías verificarla?"]
+            }
+
+        # Generar la respuesta detallada
+        response_content = await self._generate_detailed_product_response(product, message_text, db)
+        
+        # Crear el teclado interactivo para añadir al carrito
+        keyboard = {
+            "inline_keyboard": [[{"text": "Añadir al carrito 🛒", "callback_data": f"add_cart:{product.sku}"}]]
+        }
+
+        # Devolver la estructura completa de la respuesta para que el endpoint la envíe
+        return {
+            "type": "product_with_image",
+            "product": product,
+            "caption": response_content["caption"],
+            "additional_messages": response_content["additional_messages"],
+            "photo_url": product.images[0].url if product.images else None, # CORREGIDO
+            "reply_markup": keyboard
+        }
+
     async def _generate_detailed_product_response(self, product, original_question: str, db: Session) -> Dict[str, Any]:
-        """
-        Genera una respuesta conversacional y detallada sobre un producto específico.
-        Ahora retorna un diccionario con el caption para la imagen y mensajes adicionales
-        para crear una experiencia visual rica con la foto del producto.
-        """
+        """Genera una respuesta conversacional y detallada sobre un producto específico."""
         # Obtener información del stock
         total_stock = get_total_stock_by_sku(db, product.sku)
         stock_status = self._get_stock_status(total_stock)
@@ -873,21 +822,22 @@ Responde en español de manera profesional y útil.
             caption = parts[0].replace("CAPTION:", "").strip()
             additional_text = parts[1].strip()
             
-            # Dividir mensajes adicionales
             additional_messages = [msg.strip() for msg in additional_text.split("|||") if msg.strip()]
         else:
-            # Fallback si el formato no es el esperado
             messages = self.split_response_into_messages(response_text, 800)
             caption = messages[0] if messages else f"*{product.name}*\n💰 ${product.price:,.2f}"
             additional_messages = messages[1:] if len(messages) > 1 else []
         
+        # Esta función SOLO devuelve el contenido de texto.
         return {
             "caption": caption,
             "additional_messages": additional_messages
         }
 
     async def _validate_search_relevance(self, query: str, result_names: List[str]) -> bool:
-        """Usa IA para validar si los resultados son relevantes para la búsqueda."""
+        """
+        Valida si los resultados de búsqueda son relevantes para la consulta original.
+        """
         if not self.openai_client or not result_names:
             return True # Asumir relevancia si no hay IA o resultados
 
@@ -1921,13 +1871,123 @@ Responde en español de manera concisa pero completa.
         return matches >= required_matches
 
     def _get_stock_status(self, total_quantity: int) -> str:
-        """Determina el estado del stock basado en la cantidad total."""
-        if total_quantity > 20:
-            return "✅ En Stock"
-        elif 1 <= total_quantity <= 20:
-            return "⚠️ Bajo Stock (¡quedan pocas unidades!)"
+        if total_quantity > 10:
+            return "✅ Disponible"
+        elif 0 < total_quantity <= 10:
+            return "⚠️ ¡Últimas unidades!"
         else:
             return "❌ Agotado"
+
+    # ========================================
+    # MANEJO DE CALLBACKS DE BOTONES
+    # ========================================
+
+    async def _handle_callback_query(self, db: Session, callback_query: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Maneja las interacciones del usuario con los botones en línea (inline keyboards).
+        """
+        callback_data = callback_query.get('data')
+        chat_id = callback_query['message']['chat']['id']
+        message_id = callback_query['message']['message_id']
+        user_info = callback_query.get('from', {})
+
+        # Notificar a Telegram que el callback fue recibido para quitar el "loading"
+        await self._answer_callback_query(callback_query['id'])
+
+        if not callback_data:
+            return {"status": "error", "message": "No callback data received"}
+
+        logger.info(f"Callback '{callback_data}' recibido de {user_info.get('first_name')} (chat {chat_id})")
+
+        # Enrutamiento de la acción del callback
+        if callback_data.startswith("add_cart:"):
+            sku = callback_data.split(":")[1]
+            # Eliminar el teclado del mensaje original para evitar clics duplicados
+            await self._edit_message_reply_markup(chat_id, message_id)
+            return await self._handle_add_to_cart_action(db, chat_id, sku)
+        
+        elif callback_data == "continue_shopping":
+            await self._edit_message_reply_markup(chat_id, message_id)
+            return {
+                "type": "text_messages",
+                "messages": ["¡Perfecto! ¿Qué más te gustaría buscar?"]
+            }
+
+        elif callback_data == "checkout":
+            # Eliminar el teclado del mensaje anterior
+            await self._edit_message_reply_markup(chat_id, message_id)
+            return await self._handle_checkout(chat_id, callback_query['message'])
+            
+        else:
+            logger.warning(f"Callback no reconocido: {callback_data}")
+            return {"status": "warning", "message": "unhandled_callback"}
+
+    async def _handle_add_to_cart_action(self, db: Session, chat_id: int, sku: str) -> Dict[str, Any]:
+        """
+        Añade un producto al carrito y devuelve la respuesta para ser enviada.
+        """
+        # 1. Añadir el producto al carrito (reutilizando la lógica existente)
+        # Asumimos que se añade una unidad (cantidad '1') por cada clic
+        await self._handle_add_to_cart(chat_id=chat_id, args=[sku, '1'], db=db)
+
+        # 2. Obtener y mostrar el estado actual del carrito
+        cart_status_response = await self._handle_view_cart(db=db, chat_id=chat_id)
+        
+        # Extraer el mensaje formateado del carrito
+        cart_message = "Tu carrito está vacío."
+        if cart_status_response and cart_status_response.get("messages"):
+            cart_message = cart_status_response["messages"][0]
+
+        response_text = f"✅ ¡Producto añadido!\n\n{cart_message}"
+
+        # 3. Crear el nuevo teclado con opciones para continuar
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "Seguir comprando 🛍️", "callback_data": "continue_shopping"},
+                    {"text": "Finalizar compra 💳", "callback_data": "checkout"}
+                ]
+            ]
+        }
+
+        # 4. Enviar el mensaje de confirmación con el nuevo teclado
+        await self.send_message(chat_id, response_text, reply_markup=keyboard)
+        
+        return {
+            "type": "text_messages",
+            "messages": [response_text],
+            "reply_markup": keyboard
+        }
+
+    async def _answer_callback_query(self, callback_query_id: str) -> None:
+        """Responde a un callback para quitar el estado 'loading' del botón en Telegram."""
+        url = f"{self.api_base_url}/answerCallbackQuery"
+        payload = {"callback_query_id": callback_query_id}
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+        except Exception as e:
+            logger.error(f"Error respondiendo al callback query: {e}")
+            
+    async def _edit_message_reply_markup(self, chat_id: int, message_id: int, reply_markup: Optional[Dict[str, Any]] = None) -> None:
+        """Edita el teclado de un mensaje ya existente (lo elimina si no se pasa markup)."""
+        url = f"{self.api_base_url}/editMessageReplyMarkup"
+        payload = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "reply_markup": reply_markup or {} # Pasar un objeto vacío para eliminar el teclado
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            # Ignorar error "message is not modified" que ocurre si el teclado ya fue removido
+            if "message is not modified" not in e.response.text:
+                logger.error(f"Error HTTP editando el teclado del mensaje: {e.response.text}")
+        except Exception as e:
+            logger.error(f"Error genérico editando el teclado del mensaje: {e}")
 
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO

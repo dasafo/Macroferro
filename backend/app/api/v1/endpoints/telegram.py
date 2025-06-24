@@ -70,17 +70,16 @@ async def telegram_webhook(
             logger.error(f"Error validando update de Telegram: {e}")
             raise HTTPException(status_code=400, detail="Invalid update format")
         
-        # Procesar mensaje en background
-        if update.message and update.message.text:
-            background_tasks.add_task(
-                process_and_respond_multiple,
-                update_data,
-                telegram_service,
-                db
-            )
-            logger.info(f"Mensaje de chat {update.message.chat.id} agregado a cola de procesamiento")
-        else:
-            logger.info("Update sin mensaje de texto, ignorando")
+        # Procesar CUALQUIER update válido en background.
+        # La lógica de qué hacer con cada tipo de update (mensaje, callback, etc.)
+        # ya está dentro del servicio.
+        background_tasks.add_task(
+            process_and_respond_multiple,
+            update_data,
+            telegram_service,
+            db
+        )
+        logger.info(f"Update de Telegram agregado a la cola de procesamiento.")
         
         return {"status": "ok"}
         
@@ -92,51 +91,69 @@ async def telegram_webhook(
 
 async def process_and_respond_multiple(update_data: dict, bot_service: TelegramBotService, db: Session):
     """
-    Procesa el mensaje del usuario y envía la respuesta con manejo de imágenes.
-    
-    Ahora soporta:
-    - Envío de mensajes de texto múltiples
-    - Envío de productos con imágenes 
-    - Manejo inteligente según el tipo de consulta
+    Procesa el update del usuario, obtiene una respuesta estructurada del servicio
+    y se encarga de enviarla al chat correspondiente.
     """
+    chat_id = None
     try:
-        message = update_data.get("message", {})
-        chat_id = message.get("chat", {}).get("id")
-        text = message.get("text", "")
-        
-        if not chat_id or not text:
-            logger.warning("Mensaje sin chat_id o texto válido")
+        chat_id = (
+            (update_data.get('message') or {}).get('chat', {}).get('id') or
+            (update_data.get('callback_query', {}).get('message', {}).get('chat', {}).get('id'))
+        )
+        if not chat_id:
+            logger.warning("No se pudo extraer chat_id del update. Ignorando.")
             return
+
+        logger.info(f"Procesando update para chat {chat_id}...")
         
-        logger.info(f"Procesando mensaje de chat {chat_id}: {text}")
+        # 1. Obtener la respuesta estructurada del servicio
+        response_data = await bot_service.process_message(db, update_data)
         
-        # Procesar mensaje con IA - corregir parámetros
-        response_data = await bot_service.process_message(db, message)
+        if not response_data:
+            logger.info(f"El servicio determinó que no se necesita respuesta para el update del chat {chat_id}.")
+            return
+
+        # 2. Enviar la respuesta según su tipo
+        response_type = response_data.get("type")
         
-        # Enviar respuesta según el tipo
-        if response_data.get("type") == "product_with_image":
-            # Enviar producto con imagen
+        if response_type == "product_with_image":
             await bot_service.send_product_with_image(
                 chat_id=chat_id,
                 product=response_data.get("product"),
                 caption=response_data.get("caption", ""),
-                additional_messages=response_data.get("additional_messages", [])
+                additional_messages=response_data.get("additional_messages", []),
+                reply_markup=response_data.get("reply_markup")
             )
-        else:
-            # Enviar mensajes de texto múltiples (comportamiento por defecto)
-            messages = response_data.get("messages", ["Error procesando mensaje"])
-            await bot_service.send_multiple_messages(chat_id, messages)
+        elif response_type == "text_messages":
+            messages = response_data.get("messages", [])
+            if not messages:
+                return
+
+            # El teclado solo se adjunta al primer mensaje de una secuencia
+            first_message = messages[0]
+            other_messages = messages[1:]
             
-    except Exception as e:
-        logger.error(f"Error en process_and_respond_multiple: {e}")
-        try:
-            # Mensaje de error de respaldo
             await bot_service.send_message(
-                chat_id, 
-                "❌ Lo siento, hubo un error procesando tu consulta. Por favor intenta nuevamente."
+                chat_id,
+                first_message,
+                reply_markup=response_data.get("reply_markup")
             )
+            if other_messages:
+                await bot_service.send_multiple_messages(chat_id, other_messages)
+        
+        else:
+            logger.warning(f"Tipo de respuesta no reconocido del servicio: '{response_type}' para chat {chat_id}")
+
+    except Exception as e:
+        logger.error(f"Error crítico en process_and_respond_multiple para chat {chat_id}: {e}", exc_info=True)
+        try:
+            if chat_id:
+                await bot_service.send_message(
+                    chat_id, 
+                    "❌ Lo siento, hubo un error grave al procesar tu solicitud. El equipo técnico ha sido notificado."
+                )
         except Exception as send_error:
-            logger.error(f"Error enviando mensaje de error: {send_error}")
+            logger.error(f"Fallo definitivo: no se pudo enviar el mensaje de error al chat {chat_id}: {send_error}")
 
 @router.post("/set-webhook")
 async def set_webhook():
