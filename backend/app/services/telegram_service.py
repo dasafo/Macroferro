@@ -757,14 +757,14 @@ Ejemplos de búsquedas vagas:
         
         if not sku:
             # Si no se pudo resolver, devolver un mensaje de texto claro al usuario.
-            return {
-                "type": "text_messages",
-                "messages": [
+                return {
+                    "type": "text_messages",
+                    "messages": [
                     f"🤔 No estoy seguro de a qué producto te refieres con \"{product_reference}\".",
                     "Para darte la información correcta, ¿podrías ser un poco más específico? Intenta incluir la marca, el modelo o alguna característica clave."
-                ]
-            }
-
+                    ]
+                }
+                
         # Obtener el producto de la base de datos
         product = get_product_by_sku(db, sku=sku)
         if not product:
@@ -786,7 +786,7 @@ Ejemplos de búsquedas vagas:
             "caption": response_content["caption"],
             "additional_messages": response_content["additional_messages"],
             "photo_url": product.images[0].url if product.images else None,
-        }
+            }
 
     async def _generate_detailed_product_response(self, product, original_question: str, db: Session) -> Dict[str, Any]:
         """Genera una respuesta conversacional y detallada sobre un producto específico."""
@@ -913,7 +913,7 @@ Responde en español de manera profesional y útil.
             return {
                 "type": "text_messages",
                 "messages": ["Lo siento, tuve un problema al consultar nuestro catálogo. Por favor, intenta preguntando por un producto específico."]
-            }
+        }
 
     async def _validate_search_relevance(self, query: str, result_names: List[str]) -> bool:
         """
@@ -1388,8 +1388,6 @@ Responde en español de manera concisa pero completa.
             response_text += f"    `{quantity} x ${price:,.2f} = ${subtotal:,.2f}`\n\n"
         
         response_text += f"\n*Total: ${total_price:,.2f}*"
-        response_text += "\n\n💡 Puedes seguir *buscando productos*, *ver tu carrito* (o con `/ver_carrito`)"
-        response_text +=" o indicar que quieres ya *finalizar la compra* (o con `/finalizar_compra`)."
 
         return response_text
 
@@ -1434,13 +1432,12 @@ Responde en español de manera concisa pero completa.
                 add_recent_product(db, chat_id, sku)
                 
                 cart_data = response.json()
-                response_text = "✅ *Producto añadido*\n\n"
-                response_text += self._format_cart_data(cart_data)
-                
-                return {
-                    "type": "text_messages",
-                    "messages": [response_text]
-                }
+                cart_content = self._format_cart_data(cart_data)
+                return await self._create_cart_confirmation_response(
+                    chat_id,
+                    "✅ *Producto añadido*\n\n",
+                    cart_content
+                )
 
         except httpx.HTTPError as e:
             logger.error(f"Error de API al añadir al carrito para chat {chat_id}: {e}")
@@ -1468,12 +1465,8 @@ Responde en español de manera concisa pero completa.
                 for sku in items.keys():
                     add_recent_product(db, chat_id, sku)
                 
-                response_text = self._format_cart_data(cart_data)
-                
-                return {
-                    "type": "text_messages",
-                    "messages": [response_text]
-                }
+                cart_content = self._format_cart_data(cart_data)
+                return await self._create_cart_confirmation_response(chat_id, "", cart_content)
 
         except httpx.HTTPError as e:
             logger.error(f"Error de API al ver el carrito para chat {chat_id}: {e}")
@@ -1696,7 +1689,7 @@ Responde en español de manera concisa pero completa.
         return {
             "type": "text_messages",
             "messages": ["❌ Error en el proceso de recolección de datos."]
-        }
+            }
 
     async def _handle_cart_action(self, db: Session, analysis: Dict, message_text: str, chat_id: int, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1812,7 +1805,7 @@ Responde en español de manera concisa pero completa.
         """
         product_reference = analysis.get("cart_product_reference", "")
         quantity = analysis.get("cart_quantity")
-
+        
         # Si la IA no extrajo la cantidad, intentar parsearla desde el texto
         if not quantity and product_reference:
             parsed_quantity, cleaned_reference = self._parse_quantity_from_text(product_reference)
@@ -1859,21 +1852,8 @@ Responde en español de manera concisa pero completa.
                     "messages": ["🤔 No pude identificar qué producto quieres agregar. ¿Podrías especificar el producto o usar su SKU?"]
                 }
         
-        # Usar la función existente de agregar al carrito
-        response = await self._handle_add_to_cart(chat_id, [sku, str(quantity)], db)
-        
-        # NO usar _create_cart_confirmation_response porque _handle_add_to_cart ya retorna un mensaje completo
-        # Solo añadir las instrucciones adicionales al final del mensaje existente
-        if response.get("type") == "text_messages" and response.get("messages"):
-            # Agregar las instrucciones al final del mensaje existente
-            original_message = response["messages"][0]
-            instructions = (
-                "\n\n💡 Puedes seguir *buscando productos*, *ver tu carrito* (o con `/ver_carrito`)"
-                " o indicar que quieres ya *finalizar la compra* (o con `/finalizar_compra`)."
-            )
-            response["messages"][0] = original_message + instructions
-        
-        return response
+        # Usar la función existente de agregar al carrito, que ahora devuelve un mensaje completo.
+        return await self._handle_add_to_cart(chat_id, [sku, str(quantity)], db)
 
     async def _handle_natural_remove_from_cart(self, db: Session, analysis: Dict, chat_id: int) -> Dict[str, Any]:
         """
@@ -1925,16 +1905,16 @@ Responde en español de manera concisa pero completa.
                     
                     # Verificar si el producto fue eliminado completamente
                     if sku not in cart_data.get("items", {}):
-                        response_text = f"🗑️ Se ha eliminado completamente el producto *{product_name}* ({sku}) del carrito."
+                        initial_message = f"🗑️ Se ha eliminado completamente el producto *{product_name}* ({sku}) del carrito.\n\n"
                     else:
-                        response_text = f"✅ Se han eliminado {int(quantity_to_remove)} unidad(es) de *{product_name}*."
+                        initial_message = f"✅ Se han eliminado {int(quantity_to_remove)} unidad(es) de *{product_name}*.\n\n"
                     
-                    response_text += "\n\n" + self._format_cart_data(cart_data)
+                    cart_content = self._format_cart_data(cart_data)
 
                     return await self._create_cart_confirmation_response(
                         chat_id=chat_id,
-                        initial_message="", # El mensaje ya está completo
-                        cart_content=response_text
+                        initial_message=initial_message,
+                        cart_content=cart_content
                     )
 
             except httpx.HTTPError as e:
@@ -2050,7 +2030,7 @@ Responde en español de manera concisa pero completa.
                 logger.info(f"SKU exacto encontrado: {product.name} ({reference.upper()})")
                 return reference.upper()
 
-        # --- PASO 3: BÚSQUEDA EN EL CARRITO (para remove/update) ---
+                # --- PASO 3: BÚSQUEDA EN EL CARRITO (para remove/update) ---
         if action_context in ['remove', 'update']:
             try:
                 async with self._get_api_client() as client:
@@ -2097,8 +2077,8 @@ Responde en español de manera concisa pero completa.
                         return ""
                         
             except Exception as e:
-                logger.error(f"Error accediendo al carrito para resolución de referencia: {e}")
-                return ""
+                    logger.error(f"Error accediendo al carrito para resolución de referencia: {e}")
+                    return ""
 
         # --- PASO 4: BÚSQUEDA EN PRODUCTOS RECIENTES ---
         if action_context in ['add', 'search', 'product_inquiry']:
@@ -2158,7 +2138,7 @@ Responde en español de manera concisa pero completa.
                 if not semantic_products:
                     logger.info(f"No se encontraron productos semánticamente para '{reference}'")
                     return ""
-                
+        
                 # Filtrar usando _matches_reference para encontrar las mejores coincidencias
                 matching_semantic = []
                 for product in semantic_products:
@@ -2271,7 +2251,7 @@ Responde en español de manera concisa pero completa.
             if word.endswith('es') and len(word) > 4 and word[:-2] in product_text:
                 matches += 1
                 continue
-        
+
         # Calcular el porcentaje de coincidencia
         match_ratio = matches / total_words if total_words > 0 else 0
         
