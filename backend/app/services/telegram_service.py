@@ -50,6 +50,7 @@ from app.core.config import settings
 from app.services.product_service import ProductService
 from app.crud.product_crud import get_product_by_sku, get_products
 from app.db.models.product_model import Product
+from app.db.models.category_model import Category
 from app.crud.conversation_crud import (
     get_recent_products, 
     add_recent_product, 
@@ -439,6 +440,20 @@ class TelegramBotService:
         message_text = message.get("text", "")
         chat_id = message["chat"]["id"]
         
+        # --- INICIO DE LÓGICA DE PRE-PROCESAMIENTO ---
+        # Si el mensaje sigue un patrón de "qué [producto] tienes/ofreces",
+        # se convierte en una búsqueda para evitar ambigüedad en la IA.
+        match = re.search(r"qu[eé]\s+(.+)\s+(tienes|ofreces|vendes)", message_text, re.IGNORECASE)
+        if match:
+            product_query = match.group(1)
+            # Evitar que una pregunta como "qué tienes" se convierta en una búsqueda de "tienes"
+            if len(product_query.split()) < 4:
+                 # Reemplazar el texto del mensaje por una búsqueda explícita
+                original_message = message_text
+                message_text = f"Búsqueda de producto: {product_query}"
+                logger.info(f"Mensaje original '{original_message}' transformado a '{message_text}' para desambiguación.")
+        # --- FIN DE LÓGICA DE PRE-PROCESAMIENTO ---
+
         # 1. Manejo de comandos directos (sin IA)
         if message_text.startswith('/'):
             parts = message_text.split()
@@ -540,7 +555,7 @@ IMPORTANTE:
 
 Responde ÚNICAMENTE con este JSON:
 {{
-    "intent_type": "product_details" | "product_search" | "technical_question" | "cart_action" | "general_conversation",
+    "intent_type": "product_details" | "product_search" | "technical_question" | "cart_action" | "catalog_inquiry" | "general_conversation",
     "confidence": 0.8,
     "specific_product_mentioned": "nombre exacto del producto si se menciona" | null,
     "search_terms": ["término1", "término2"] | null,
@@ -557,6 +572,7 @@ Tipos de intent:
 - "product_search": Usuario busca productos por categoría/tipo general 
 - "technical_question": Pregunta técnica sobre especificaciones
 - "cart_action": Usuario quiere gestionar su carrito (agregar, quitar, ver, vaciar, finalizar)
+- "catalog_inquiry": El usuario pregunta de forma general qué productos se venden (ej: "qué vendes", "qué tienes").
 - "general_conversation": Saludo, información general, otros temas
 
 Ejemplos de cart_action:
@@ -576,12 +592,14 @@ Ejemplos de cart_action:
 - "Quita 1 guante del carrito" -> cart_action: "remove", cart_quantity: 1, cart_product_reference: "guante"
 - "elimina dos de esos" -> cart_action: "remove", cart_quantity: 2, cart_product_reference: "esos"
 - "saca un adhesivo" -> cart_action: "remove", cart_quantity: 1, cart_product_reference: "un adhesivo"
+- "quita mejor 32 pinturas del carro" -> cart_action: "remove", cart_quantity: 32, cart_product_reference: "pinturas"
 - "si añade 3 adhesivos de montaje Facom al carro" -> cart_action: "add", cart_quantity: 3, cart_product_reference: "adhesivos de montaje Facom"
 - "6 de Adhesivo Profesional Hilti" -> cart_action: "add", cart_quantity: 6, cart_product_reference: "Adhesivo Profesional Hilti"
 - "añade 5 guantes mas al carro" -> cart_action: "add", cart_quantity: 5, cart_product_reference: "guantes", "is_update": true
 
 IMPORTANTE para cart_product_reference:
 - Mantén SIEMPRE la referencia en español exactamente como la dice el usuario
+- **NUNCA incluyas números en este campo.** Los números van en el campo "cart_quantity".
 - Si dice "esos tornillos UNC", pon exactamente "esos tornillos UNC"
 - Si dice "el taladro Hilti", pon exactamente "el taladro Hilti"
 - Si dice "ese martillo", pon exactamente "ese martillo"
@@ -600,7 +618,8 @@ IMPORTANTE sobre búsquedas vagas:
 
 Ejemplos de búsquedas vagas:
 - "tienes cosas de metal?" -> intent_type: "general_conversation"
-- "qué vendes?" -> intent_type: "general_conversation"
+- "qué vendes?" -> intent_type: "catalog_inquiry"
+- "qué tipo de productos tenéis?" -> intent_type: "catalog_inquiry"
 - "dame productos" -> intent_type: "general_conversation"
 """
             
@@ -654,6 +673,9 @@ Ejemplos de búsquedas vagas:
             
             if intent_type == "product_details":
                 return await self._handle_specific_product_inquiry(db, analysis, message_text, chat_id)
+            
+            elif intent_type == "catalog_inquiry":
+                return await self._handle_catalog_inquiry(db)
             
             elif intent_type == "product_search":
                 messages = await self._handle_product_search(db, analysis, message_text, chat_id)
@@ -739,7 +761,7 @@ Ejemplos de búsquedas vagas:
             "product": product,
             "caption": response_content["caption"],
             "additional_messages": response_content["additional_messages"],
-            "photo_url": product.images[0].url if product.images else None, # CORREGIDO
+            "photo_url": product.images[0].url if product.images else None,
             "reply_markup": keyboard
         }
 
@@ -822,17 +844,53 @@ Responde en español de manera profesional y útil.
             caption = parts[0].replace("CAPTION:", "").strip()
             additional_text = parts[1].strip()
             
+            # Dividir mensajes adicionales
             additional_messages = [msg.strip() for msg in additional_text.split("|||") if msg.strip()]
         else:
+            # Fallback si el formato no es el esperado
             messages = self.split_response_into_messages(response_text, 800)
             caption = messages[0] if messages else f"*{product.name}*\n💰 ${product.price:,.2f}"
             additional_messages = messages[1:] if len(messages) > 1 else []
         
+        # Añadir el prompt de cómo añadir al carrito
+        cart_prompt = "\n💡 Para añadir al carrito, pulsa el botón o indica la cantidad que deseas (ej: 'añade 5')."
+        additional_messages.append(cart_prompt)
+
         # Esta función SOLO devuelve el contenido de texto.
         return {
             "caption": caption,
             "additional_messages": additional_messages
         }
+
+    async def _handle_catalog_inquiry(self, db: Session) -> Dict[str, Any]:
+        """Maneja la solicitud general del catálogo mostrando las categorías principales."""
+        logger.info("Manejando consulta de catálogo general.")
+        try:
+            top_level_categories = db.query(Category).filter(Category.parent_id.is_(None)).order_by(Category.name).all()
+
+            if not top_level_categories:
+                return {
+                    "type": "text_messages",
+                    "messages": ["Manejamos una gran variedad de productos industriales, pero no pude cargar las categorías en este momento. ¿Te interesa algún tipo de producto en particular?"]
+                }
+
+            category_names = [f"• {cat.name}" for cat in top_level_categories]
+            message = (
+                "¡Claro! En Macroferro somos especialistas en productos industriales. Estas son nuestras categorías principales:\n\n"
+                + "\n".join(category_names)
+                + "\n\n💡 Puedes preguntarme por cualquiera de ellas (ej: 'qué tienes en tornillería') para ver más detalles."
+            )
+
+            return {
+                "type": "text_messages",
+                "messages": [message]
+            }
+        except Exception as e:
+            logger.error(f"Error al obtener las categorías principales: {e}")
+            return {
+                "type": "text_messages",
+                "messages": ["Lo siento, tuve un problema al consultar nuestro catálogo. Por favor, intenta preguntando por un producto específico."]
+            }
 
     async def _validate_search_relevance(self, query: str, result_names: List[str]) -> bool:
         """
@@ -887,7 +945,7 @@ Responde en español de manera profesional y útil.
         search_results = await self.product_service.search_products(
             db=db,
             query_text=search_query,
-            top_k=8  # Más productos para mejor selección
+            top_k=5  # Limitar a 5 resultados potenciales
         )
         
         main_products = search_results.get("main_results", [])
@@ -947,7 +1005,10 @@ Responde en español de manera profesional y útil.
             messages.append(product_message)
 
         # Mensaje final conversacional
-        follow_up = "\n💬 ¿Te interesa conocer más detalles de alguno de estos productos?"
+        follow_up = (
+            "\n💬 ¿Te interesa conocer más detalles de alguno de estos productos?\n\n"
+            "💡 Para añadir al carrito, indica el producto y la cantidad (ej: 'añade 5 de esos tornillos')."
+        )
         messages.append(follow_up)
         
         return messages
@@ -1657,7 +1718,16 @@ Responde en español de manera concisa pero completa.
                 }
         
         # Usar la función existente de agregar al carrito
-        return await self._handle_add_to_cart(chat_id, [sku, str(quantity)], db)
+        response = await self._handle_add_to_cart(chat_id, [sku, str(quantity)], db)
+        
+        # Envolver la respuesta para añadir el teclado de post-compra
+        if response.get("type") == "text_messages":
+            return await self._create_cart_confirmation_response(
+                chat_id=chat_id,
+                initial_message="✅ *Producto añadido*\n",
+                cart_content=response["messages"][0]
+            )
+        return response
 
     async def _handle_natural_remove_from_cart(self, db: Session, analysis: Dict, chat_id: int) -> Dict[str, Any]:
         """
@@ -1708,7 +1778,11 @@ Responde en español de manera concisa pero completa.
                     
                     response_text += "\n\n" + self._format_cart_data(cart_data)
 
-                    return {"type": "text_messages", "messages": [response_text]}
+                    return await self._create_cart_confirmation_response(
+                        chat_id=chat_id,
+                        initial_message="", # El mensaje ya está completo
+                        cart_content=response_text
+                    )
 
             except httpx.HTTPError as e:
                 logger.error(f"Error de API al reducir cantidad para chat {chat_id}: {e}")
@@ -1726,7 +1800,14 @@ Responde en español de manera concisa pero completa.
                 return {"type": "text_messages", "messages": ["Ocurrió un error inesperado. Por favor, intenta de nuevo."]}
         else:
             # Si no se especifica cantidad, eliminar el producto completo
-            return await self._handle_remove_from_cart(chat_id, [sku])
+            response = await self._handle_remove_from_cart(chat_id, [sku])
+            if response.get("type") == "text_messages":
+                 return await self._create_cart_confirmation_response(
+                    chat_id=chat_id,
+                    initial_message=f"🗑️ Producto `{sku}` eliminado del carrito.\n",
+                    cart_content="" # El carrito se mostrará a continuación
+                )
+            return response
 
     async def _resolve_product_reference(self, db: Session, reference: str, chat_id: int, action_context: str = 'search') -> str:
         """
@@ -1926,38 +2007,14 @@ Responde en español de manera concisa pero completa.
         """
         Añade un producto al carrito y devuelve la respuesta para ser enviada.
         """
-        # 1. Añadir el producto al carrito (reutilizando la lógica existente)
-        # Asumimos que se añade una unidad (cantidad '1') por cada clic
+        # 1. Añadir el producto al carrito
         await self._handle_add_to_cart(chat_id=chat_id, args=[sku, '1'], db=db)
-
-        # 2. Obtener y mostrar el estado actual del carrito
-        cart_status_response = await self._handle_view_cart(db=db, chat_id=chat_id)
         
-        # Extraer el mensaje formateado del carrito
-        cart_message = "Tu carrito está vacío."
-        if cart_status_response and cart_status_response.get("messages"):
-            cart_message = cart_status_response["messages"][0]
-
-        response_text = f"✅ ¡Producto añadido!\n\n{cart_message}"
-
-        # 3. Crear el nuevo teclado con opciones para continuar
-        keyboard = {
-            "inline_keyboard": [
-                [
-                    {"text": "Seguir comprando 🛍️", "callback_data": "continue_shopping"},
-                    {"text": "Finalizar compra 💳", "callback_data": "checkout"}
-                ]
-            ]
-        }
-
-        # 4. Enviar el mensaje de confirmación con el nuevo teclado
-        await self.send_message(chat_id, response_text, reply_markup=keyboard)
-        
-        return {
-            "type": "text_messages",
-            "messages": [response_text],
-            "reply_markup": keyboard
-        }
+        # 2. Devolver la respuesta de confirmación con el carrito y los botones
+        return await self._create_cart_confirmation_response(
+            chat_id=chat_id,
+            initial_message="✅ ¡Producto añadido!\n\n"
+        )
 
     async def _answer_callback_query(self, callback_query_id: str) -> None:
         """Responde a un callback para quitar el estado 'loading' del botón en Telegram."""
@@ -1988,6 +2045,48 @@ Responde en español de manera concisa pero completa.
                 logger.error(f"Error HTTP editando el teclado del mensaje: {e.response.text}")
         except Exception as e:
             logger.error(f"Error genérico editando el teclado del mensaje: {e}")
+
+    async def _create_cart_confirmation_response(self, chat_id: int, initial_message: str, cart_content: str = "") -> Dict[str, Any]:
+        """Crea una respuesta estándar post-actualización de carrito."""
+        if not cart_content:
+            # Si no se provee contenido, obtener el carrito actual
+            try:
+                async with self._get_api_client() as client:
+                    response = await client.get(f"/cart/{chat_id}")
+                    response.raise_for_status()
+                    cart_data = response.json()
+                    cart_content = self._format_cart_data(cart_data)
+            except Exception as e:
+                logger.error(f"No se pudo obtener el carrito para la confirmación: {e}")
+                cart_content = "No pude mostrar tu carrito actualizado."
+
+        final_message = initial_message + cart_content
+
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "Seguir comprando 🛍️", "callback_data": "continue_shopping"},
+                    {"text": "Finalizar compra 💳", "callback_data": "checkout"}
+                ]
+            ]
+        }
+        
+        return {
+            "type": "text_messages",
+            "messages": [final_message],
+            "reply_markup": keyboard
+        }
+
+    def _create_quantity_keyboard(self, sku: str, quantity: int = 1) -> Dict[str, Any]:
+        """Crea el teclado interactivo con control de cantidad."""
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": f"Agregar {quantity} {sku}", "callback_data": f"add_cart:{sku}"},
+                    {"text": "Quitar", "callback_data": f"remove_cart:{sku}"}
+                ]
+            ]
+        }
 
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO
