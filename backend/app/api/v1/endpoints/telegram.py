@@ -8,7 +8,7 @@ import json
 
 from app.core.config import settings
 from app.api.deps import get_db
-from app.schemas.telegram import TelegramUpdate
+from app.schemas.telegram_schema import TelegramUpdate
 from app.services.telegram_service import TelegramBotService
 
 logger = logging.getLogger(__name__)

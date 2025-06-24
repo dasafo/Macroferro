@@ -20,7 +20,7 @@ from typing import Optional, List, Any, Dict
 from pydantic import BaseModel, HttpUrl, validator, Field, ConfigDict
 import json
 
-from .category import CategoryResponse # Importamos el schema de respuesta de categoría
+from .category_schema import CategoryResponse # Importamos el schema de respuesta de categoría
 
 # ========================================
 # ESQUEMAS AUXILIARES

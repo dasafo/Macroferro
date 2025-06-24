@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import datetime
 import enum
 
-from .product import ProductResponse # Importar el esquema de respuesta del producto
+from .product_schema import ProductResponse # Importar el esquema de respuesta del producto
 
 # Enum para el estado del pedido, debe coincidir con el del modelo
 class OrderStatus(str, enum.Enum):

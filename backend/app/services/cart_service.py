@@ -3,7 +3,7 @@ from typing import Dict, Optional
 
 import redis.asyncio as redis
 from app.core.config import Settings
-from app.schemas.product import ProductResponse as ProductSchema
+from app.schemas.product_schema import ProductResponse as ProductSchema
 
 class CartService:
     """

@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.db.models.order_model import Order, OrderItem
-from app.schemas.order import OrderCreate, OrderStatus
+from app.schemas.order_schema import OrderCreate, OrderStatus
 
 def create_order(db: Session, order: OrderCreate, total_amount: float) -> Order:
     """

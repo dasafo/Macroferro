@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 
 from app.db.models.category_model import Category
-from app.schemas import category as category_schema # Importamos los schemas Pydantic para categorías
+from app.schemas import category_schema # Importamos los schemas Pydantic para categorías
 
 # ========================================
 # OPERACIONES DE LECTURA (READ)

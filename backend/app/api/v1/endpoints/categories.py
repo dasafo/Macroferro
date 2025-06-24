@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.api import deps
-from app.schemas import category as category_schema
+from app.schemas import category_schema as category_schema
 from app.services.category_service import category_service
 
 router = APIRouter()

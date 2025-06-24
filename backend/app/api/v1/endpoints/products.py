@@ -10,7 +10,7 @@ from typing import List, Optional
 import logging
 
 from app.api import deps
-from app.schemas import product as product_schema
+from app.schemas import product_schema as product_schema
 from app.services.product_service import product_service
 
 logger = logging.getLogger(__name__)

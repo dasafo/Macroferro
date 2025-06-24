@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session, joinedload, subqueryload,selectinload
 from typing import List, Optional, Dict, Any
 
 from app.db.models.product_model import Product, ProductImage, Image
-from app.schemas import product as product_schema # Schemas Pydantic para productos
+from app.schemas import product_schema as product_schema # Schemas Pydantic para productos
 
 # ========================================
 # OPERACIONES DE LECTURA (READ)

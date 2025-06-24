@@ -37,7 +37,7 @@ import logging
 
 from app.db.models.product_model import Product # Actualizado
 from app.crud import product_crud, category_crud  # Removido image_crud hasta que se implemente
-from app.schemas import product as product_schema
+from app.schemas import product_schema as product_schema
 from openai import AsyncOpenAI, OpenAI # Usar cliente asíncrono
 from qdrant_client import AsyncQdrantClient, QdrantClient, models as qdrant_models # Usar cliente asíncrono
 from qdrant_client.models import Filter, FieldCondition, MatchValue

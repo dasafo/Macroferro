@@ -4,11 +4,11 @@ from typing import List
 
 from app.api import deps
 from app.core.config import Settings
-from app.schemas.product import ProductResponse
-from app.schemas.order import Order, OrderCreate
+from app.schemas.product_schema import ProductResponse
+from app.schemas.order_schema import Order, OrderCreate
 from app.services.cart_service import CartService
 from app.crud import order_crud, product_crud
-from app.schemas.cart import CartItemCreate, Cart
+from app.schemas.cart_schema import CartItemCreate, Cart
 
 router = APIRouter()
 

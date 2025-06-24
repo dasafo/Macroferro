@@ -32,7 +32,7 @@ from typing import List, Optional
 
 from app.db.models.category_model import Category
 from app.crud import category_crud
-from app.schemas import category as category_schema
+from app.schemas import category_schema as category_schema
 # Podríamos definir excepciones personalizadas aquí o en un módulo `exceptions.py`
 # from app.core.exceptions import NotFoundError, DuplicateError
 
