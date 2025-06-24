@@ -1580,29 +1580,27 @@ Responde en español de manera concisa pero completa.
                 # Iniciar el proceso de recolección de datos
                 set_pending_action(db, chat_id, "checkout_collect_name", {})
                 
-                initial_message = (
-                    f"✅ *Proceso de Compra Iniciado*\n\n"
-                    f"{cart_summary}\n\n"
-                    f"📋 *Ahora necesito algunos datos para completar tu pedido:*\n\n"
-                    f"👤 Por favor, envíame tu *nombre completo*:"
-                )
+                messages_to_send = [
+                    f"✅ *Proceso de Compra Iniciado*\n\n{cart_summary}",
+                    "📋 Para completar tu pedido, ahora necesito algunos datos.\n\n👤 Por favor, envíame tu *nombre completo*:"
+                ]
                 
                 return {
                     "type": "text_messages",
-                    "messages": [initial_message]
+                    "messages": messages_to_send
                 }
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 400:
                 return {
                     "type": "text_messages",
-                    "messages": ["🛒 Tu carrito está vacío, no se puede finalizar la compra."]
+                    "messages": ["🛒 Error en el carrito. Por favor, revisa tus productos y vuelve a intentar."]
                 }
             else:
                 logger.error(f"Error de API en checkout para chat {chat_id}: {e}")
                 return {
                     "type": "text_messages",
-                    "messages": ["❌ Lo siento, ocurrió un error al procesar tu pedido."]
+                    "messages": ["❌ Lo siento, ocurrió un error al procesar tu pedido. Intenta de nuevo."]
                 }
         except Exception as e:
             logger.error(f"Error inesperado en checkout para chat {chat_id}: {e}")
