@@ -49,6 +49,7 @@ import os
 from app.core.config import settings
 from app.services.product_service import ProductService
 from app.crud.product_crud import get_product_by_sku, get_products
+from app.crud.client_crud import get_client_by_email, create_client
 from app.db.models.product_model import Product
 from app.db.models.category_model import Category
 from app.crud.conversation_crud import (
@@ -448,7 +449,7 @@ class TelegramBotService:
             action_data = pending_action_info.get("data", {})
             
             # Si es una acción de recolección de datos del checkout, procesarla
-            if current_action and current_action.startswith("checkout_collect"):
+            if current_action and current_action.startswith("checkout"):
                 return await self._process_checkout_data_collection(
                     db, chat_id, message_text, current_action, action_data
                 )
@@ -1571,18 +1572,18 @@ Responde en español de manera concisa pero completa.
                         "messages": ["🛒 Tu carrito está vacío. No puedes finalizar una compra."]
                     }
 
-                # 2. Mostrar resumen del carrito y comenzar recolección de datos
+                # 2. Mostrar resumen del carrito y preguntar si es cliente recurrente
                 cart_summary = self._format_cart_data(cart_data)
                 
                 # Limpiar cualquier acción pendiente anterior
                 clear_pending_action(db, chat_id)
                 
-                # Iniciar el proceso de recolección de datos
-                set_pending_action(db, chat_id, "checkout_collect_name", {})
+                # Iniciar el proceso preguntando si es cliente recurrente
+                set_pending_action(db, chat_id, "checkout_ask_if_recurrent", {})
                 
                 messages_to_send = [
                     f"✅ *Proceso de Compra Iniciado*\n\n{cart_summary}",
-                    "📋 Para completar tu pedido, ahora necesito algunos datos.\n\n👤 Por favor, envíame tu *nombre completo*:"
+                    "👋 Antes de continuar, ¿ya eres cliente nuestro? (responde *sí* o *no*)"
                 ]
                 
                 return {
@@ -1612,6 +1613,75 @@ Responde en español de manera concisa pero completa.
     async def _process_checkout_data_collection(self, db: Session, chat_id: int, message_text: str, current_action: str, action_data: Dict[str, Any]) -> Dict[str, Any]:
         """Procesa la recolección de datos del cliente paso a paso."""
         
+        user_response = message_text.strip().lower()
+
+        if current_action == "checkout_ask_if_recurrent":
+            if 'sí' in user_response or 'si' in user_response:
+                set_pending_action(db, chat_id, "checkout_get_recurrent_email", {})
+                return {
+                    "type": "text_messages",
+                    "messages": ["¡Genial! Por favor, envíame tu *correo electrónico* para buscar tus datos."]
+                }
+            elif 'no' in user_response:
+                set_pending_action(db, chat_id, "checkout_collect_name", {})
+                return {
+                    "type": "text_messages",
+                    "messages": ["Entendido. Comencemos con el registro.\n\n👤 Por favor, envíame tu *nombre completo*:"]
+                }
+            else:
+                return {
+                    "type": "text_messages",
+                    "messages": ["🤔 No entendí tu respuesta. Por favor, responde solo *sí* o *no*."]
+                }
+
+        if current_action == "checkout_get_recurrent_email":
+            email = user_response
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if not re.match(email_pattern, email):
+                return {
+                    "type": "text_messages",
+                    "messages": ["❌ Por favor, ingresa un correo electrónico válido:"]
+                }
+            
+            client = get_client_by_email(db, email)
+            if client:
+                action_data = {
+                    "name": client.name,
+                    "email": client.email,
+                    "phone": client.phone,
+                    "address": client.address
+                }
+                set_pending_action(db, chat_id, "checkout_confirm_recurrent_data", action_data)
+                confirmation_message = (
+                    f"¡Hola de nuevo, *{client.name}*! 👋\n\n"
+                    f"He encontrado estos datos:\n"
+                    f"📞 Teléfono: *{client.phone}*\n"
+                    f"🏠 Dirección: *{client.address}*\n\n"
+                    "¿Son correctos estos datos para el envío? (responde *sí* o *no*)"
+                )
+                return {
+                    "type": "text_messages",
+                    "messages": [confirmation_message]
+                }
+            else:
+                set_pending_action(db, chat_id, "checkout_collect_name", {"email": email})
+                return {
+                    "type": "text_messages",
+                    "messages": ["No encontré tus datos. No te preocupes, vamos a registrarlos.\n\n👤 Para empezar, ¿cuál es tu *nombre completo*?"]
+                }
+
+        if current_action == "checkout_confirm_recurrent_data":
+            if 'sí' in user_response or 'si' in user_response:
+                # Los datos son correctos, finalizar la compra
+                return await self._finalize_checkout_with_customer_data(db, chat_id, action_data)
+            else:
+                # Los datos no son correctos, iniciar recolección manual
+                set_pending_action(db, chat_id, "checkout_collect_name", {"email": action_data.get("email")})
+                return {
+                    "type": "text_messages",
+                    "messages": ["Entendido, vamos a actualizar tus datos.\n\n👤 Por favor, envíame tu *nombre completo*:"]
+                }
+
         if current_action == "checkout_collect_name":
             # Validar nombre
             name = message_text.strip()
@@ -1623,12 +1693,20 @@ Responde en español de manera concisa pero completa.
             
             # Guardar nombre y pedir email
             action_data["name"] = name
-            set_pending_action(db, chat_id, "checkout_collect_email", action_data)
             
-            return {
-                "type": "text_messages",
-                "messages": [f"✅ Perfecto, *{name}*\n\n📧 Ahora envíame tu *correo electrónico*:"]
-            }
+            # Si el email ya lo teníamos, pedimos el teléfono directamente
+            if action_data.get("email"):
+                set_pending_action(db, chat_id, "checkout_collect_phone", action_data)
+                return {
+                    "type": "text_messages",
+                    "messages": [f"✅ Perfecto, *{name}*\n\n📱 Ahora envíame tu *número de teléfono*:"]
+                }
+            else:
+                set_pending_action(db, chat_id, "checkout_collect_email", action_data)
+                return {
+                    "type": "text_messages",
+                    "messages": [f"✅ Perfecto, *{name}*\n\n📧 Ahora envíame tu *correo electrónico*:"]
+                }
             
         elif current_action == "checkout_collect_email":
             # Validar email
