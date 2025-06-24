@@ -747,14 +747,12 @@ Ejemplos de búsquedas vagas:
                 "messages": [f"No encontré ningún producto con la referencia '{sku}'. ¿Podrías verificarla?"]
             }
 
+        # Guardar este producto como el más reciente en el contexto del usuario
+        add_recent_product(db, chat_id, product.sku)
+
         # Generar la respuesta detallada
         response_content = await self._generate_detailed_product_response(product, message_text, db)
         
-        # Crear el teclado interactivo para añadir al carrito
-        keyboard = {
-            "inline_keyboard": [[{"text": "Añadir al carrito 🛒", "callback_data": f"add_cart:{product.sku}"}]]
-        }
-
         # Devolver la estructura completa de la respuesta para que el endpoint la envíe
         return {
             "type": "product_with_image",
@@ -762,7 +760,6 @@ Ejemplos de búsquedas vagas:
             "caption": response_content["caption"],
             "additional_messages": response_content["additional_messages"],
             "photo_url": product.images[0].url if product.images else None,
-            "reply_markup": keyboard
         }
 
     async def _generate_detailed_product_response(self, product, original_question: str, db: Session) -> Dict[str, Any]:
@@ -853,7 +850,7 @@ Responde en español de manera profesional y útil.
             additional_messages = messages[1:] if len(messages) > 1 else []
         
         # Añadir el prompt de cómo añadir al carrito
-        cart_prompt = "\n💡 Para añadir al carrito, pulsa el botón o indica la cantidad que deseas (ej: 'añade 5')."
+        cart_prompt = "\n🛒 Para añadir al carrito, indica la cantidad que deseas (ej: 'añade 5 de estos' o 'agrega este producto')."
         additional_messages.append(cart_prompt)
 
         # Esta función SOLO devuelve el contenido de texto.
@@ -983,7 +980,7 @@ Responde en español de manera profesional y útil.
             ]
 
         # Formatear la respuesta
-        initial_message = f"🔍 ¡Perfecto! Encontré estos productos para tu búsqueda de *{search_query}*:"
+        initial_message = f"🔍 Encontré estos productos para tu búsqueda de *{search_query}*:"
         messages.append(initial_message)
         
         # Registrar productos como vistos recientemente
@@ -1365,6 +1362,9 @@ Responde en español de manera concisa pero completa.
             response_text += f"    `{quantity} x ${price:,.2f} = ${subtotal:,.2f}`\n\n"
         
         response_text += f"\n*Total: ${total_price:,.2f}*"
+        response_text += "\n\n💡 Puedes seguir *buscando productos*, *ver tu carrito* (o con `/ver_carrito`)"
+        response_text +=" o indicar que quieres ya *finalizar la compra* (o con `/finalizar_compra`)."
+
         return response_text
 
     async def _handle_add_to_cart(self, chat_id: int, args: List[str], db: Session) -> Dict[str, Any]:
@@ -1671,6 +1671,43 @@ Responde en español de manera concisa pero completa.
                 "messages": ["❌ Lo siento, ocurrió un error al procesar tu solicitud del carrito. Por favor, intenta de nuevo."]
             }
 
+    def _parse_quantity_from_text(self, text: str) -> (Optional[int], str):
+        """
+        Intenta extraer una cantidad numérica (escrita en letra) del texto.
+        Devuelve la cantidad y el texto sin la palabra numérica.
+        """
+        if not text:
+            return None, text
+
+        number_words = {
+            "un": 1, "una": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
+            "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
+            "once": 11, "doce": 12, "trece": 13, "catorce": 14, "quince": 15,
+            "dieciséis": 16, "diecisiete": 17, "dieciocho": 18, "diecinueve": 19, "veinte": 20,
+            "veintiuno": 21, "veintidós": 22, "veintitrés": 23, "veinticuatro": 24, "veinticinco": 25,
+            "veintiséis": 26, "veintisiete": 27, "veintiocho": 28, "veintinueve": 29, "treinta": 30,
+            "treinta y uno": 31, "treinta y dos": 32, "treinta y tres": 33, "treinta y cuatro": 34, "treinta y cinco": 35,
+            "treinta y seis": 36, "treinta y siete": 37, "treinta y ocho": 38, "treinta y nueve": 39, "cuarenta": 40,
+            "cuarenta y uno": 41, "cuarenta y dos": 42, "cuarenta y tres": 43, "cuarenta y cuatro": 44, "cuarenta y cinco": 45,
+            "cuarenta y seis": 46, "cuarenta y siete": 47, "cuarenta y ocho": 48, "cuarenta y nueve": 49, "cincuenta": 50
+        }
+        
+        lower_text = text.lower()
+        for word_num, num_val in number_words.items():
+            # Usar regex para buscar palabras completas
+            match = re.search(rf'\b{word_num}\b', lower_text)
+            if match:
+                quantity = num_val
+                # Eliminar la palabra numérica del texto original (insensible a mayúsculas/minúsculas)
+                cleaned_text = re.sub(rf'\b{word_num}\b', '', text, count=1, flags=re.IGNORECASE).strip()
+                # Limpiar posibles dobles espacios
+                cleaned_text = re.sub(r'\s{2,}', ' ', cleaned_text)
+                
+                logger.info(f"Cantidad '{quantity}' parseada desde el texto. Nuevo texto de referencia: '{cleaned_text}'")
+                return quantity, cleaned_text
+        
+        return None, text
+
     async def _handle_natural_add_to_cart(self, db: Session, analysis: Dict, chat_id: int) -> Dict[str, Any]:
         """
         Maneja agregar productos al carrito usando lenguaje natural.
@@ -1678,6 +1715,13 @@ Responde en español de manera concisa pero completa.
         product_reference = analysis.get("cart_product_reference", "")
         quantity = analysis.get("cart_quantity")
         
+        # Si la IA no extrajo la cantidad, intentar parsearla desde el texto
+        if not quantity and product_reference:
+            parsed_quantity, cleaned_reference = self._parse_quantity_from_text(product_reference)
+            if parsed_quantity:
+                quantity = parsed_quantity
+                product_reference = cleaned_reference
+
         # Si no se especifica cantidad, usar 1 por defecto
         if not quantity or not isinstance(quantity, (int, str)) or str(quantity).strip() == "":
             quantity = 1
@@ -1736,6 +1780,13 @@ Responde en español de manera concisa pero completa.
         product_reference = analysis.get("cart_product_reference", "")
         quantity_to_remove = analysis.get("cart_quantity")
 
+        # Si la IA no extrajo la cantidad, intentar parsearla desde el texto
+        if not quantity_to_remove and product_reference:
+            parsed_quantity, cleaned_reference = self._parse_quantity_from_text(product_reference)
+            if parsed_quantity:
+                quantity_to_remove = parsed_quantity
+                product_reference = cleaned_reference
+
         if not product_reference:
             return {
                 "type": "text_messages",
@@ -1774,7 +1825,7 @@ Responde en español de manera concisa pero completa.
                     if sku not in cart_data.get("items", {}):
                         response_text = f"🗑️ Se ha eliminado completamente el producto *{product_name}* ({sku}) del carrito."
                     else:
-                        response_text = f"✅ Se han eliminado {int(quantity_to_remove)} unidad(es) de *{product_name}*.\n\n"
+                        response_text = f"✅ Se han eliminado {int(quantity_to_remove)} unidad(es) de *{product_name}*."
                     
                     response_text += "\n\n" + self._format_cart_data(cart_data)
 
@@ -1799,7 +1850,27 @@ Responde en español de manera concisa pero completa.
                 logger.error(f"Error inesperado al reducir cantidad para chat {chat_id}: {e}")
                 return {"type": "text_messages", "messages": ["Ocurrió un error inesperado. Por favor, intenta de nuevo."]}
         else:
-            # Si no se especifica cantidad, eliminar el producto completo
+            # Si no se especifica cantidad, debemos resolver la referencia
+            sku_or_ambiguous = await self._resolve_product_reference(db, product_reference, chat_id, action_context='remove')
+
+            if not sku_or_ambiguous:
+                return {
+                    "type": "text_messages",
+                    "messages": [f"🤔 No pude identificar qué producto quieres quitar: '{product_reference}'. ¿Podrías ser más específico o usar el SKU del producto?"]
+                }
+
+            if sku_or_ambiguous.startswith("AMBIGUOUS_REFERENCE|"):
+                parts = sku_or_ambiguous.split("|")[1]
+                products_info = [p.split(":", 1) for p in parts.split(";")]
+                
+                message = f"🤔 Encontré varios productos en tu carrito que coinciden con '{product_reference}'. ¿A cuál te refieres?\n"
+                for sku, name in products_info:
+                    message += f"\n• *{name}* (SKU: `{sku}`)"
+                message += "\n\n💡 Por favor, intenta de nuevo usando el SKU para ser más preciso (ej: `/eliminar {products_info[0][0]}`)."
+                return {"type": "text_messages", "messages": [message]}
+
+            # Si llegamos aquí, es un SKU único y se elimina el producto completo.
+            sku = sku_or_ambiguous
             response = await self._handle_remove_from_cart(chat_id, [sku])
             if response.get("type") == "text_messages":
                  return await self._create_cart_confirmation_response(
@@ -1818,6 +1889,32 @@ Responde en español de manera concisa pero completa.
         """
         if not reference:
             return ""
+
+        # --- PASO 0: MANEJO DE REFERENCIAS CONTEXTUALES DIRECTAS ---
+        # Palabras que casi siempre se refieren al último producto visto.
+        demonstrative_references = [
+            "este", "esta", "estos", "estas",
+            "ese", "esa", "esos", "esas",
+            "aquel", "aquella", "aquellos", "aquellas",
+            "eso", "esto", "el último", "la última", "los últimos", "las últimas",
+            "ese producto", "este producto", "el producto", "del producto"
+        ]
+        
+        # Limpiar la referencia de palabras comunes para una comparación más limpia.
+        clean_reference = reference.lower().replace("de ", "").strip()
+        
+        # Si la referencia es una de estas palabras y la acción es sobre el carrito,
+        # asumir que se refiere al producto más reciente.
+        if clean_reference in demonstrative_references and action_context in ['add', 'remove', 'update']:
+            logger.info(f"Referencia contextual directa detectada: '{reference}'. Resolviendo al producto más reciente.")
+            recent_skus = get_recent_products(db, chat_id, limit=1)
+            if recent_skus:
+                # Se encontró el producto más reciente, devolver su SKU directamente.
+                return recent_skus[0]
+            else:
+                # No hay contexto reciente, la referencia es ambigua.
+                logger.warning(f"Referencia contextual '{reference}' usada sin un producto reciente en el contexto.")
+                return ""
 
         candidates = []
         
@@ -1872,6 +1969,19 @@ Responde en español de manera concisa pero completa.
             logger.warning(f"No se pudo resolver la referencia a producto para '{reference}' (contexto: {action_context}).")
             return ""
         
+        # Si solo hay un candidato posible, es inequívoco.
+        if len(candidates) == 1:
+            logger.info(f"Referencia '{reference}' resuelta inequívocamente a SKU: {candidates[0].sku}")
+            return candidates[0].sku
+
+        # Si hay múltiples candidatos, la lógica depende del contexto.
+        if action_context in ['remove', 'update']:
+            # En el contexto de eliminar/actualizar, la ambigüedad debe ser resuelta por el usuario.
+            logger.warning(f"Referencia ambigua para '{reference}' en el carrito: {[p.name for p in candidates]}")
+            ambiguous_info = ";".join([f"{p.sku}:{p.name}" for p in candidates])
+            return f"AMBIGUOUS_REFERENCE|{ambiguous_info}"
+
+        # Para otros contextos (add, search), intentar resolver con el mejor candidato.
         return self._resolve_ambiguous_reference(candidates, reference)
 
     def _resolve_ambiguous_reference(self, candidates: List[Product], reference: str) -> str:
@@ -1960,91 +2070,8 @@ Responde en español de manera concisa pero completa.
             return "❌ Agotado"
 
     # ========================================
-    # MANEJO DE CALLBACKS DE BOTONES
+    # LÓGICA DE CONFIRMACIÓN DE CARRITO
     # ========================================
-
-    async def _handle_callback_query(self, db: Session, callback_query: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Maneja las interacciones del usuario con los botones en línea (inline keyboards).
-        """
-        callback_data = callback_query.get('data')
-        chat_id = callback_query['message']['chat']['id']
-        message_id = callback_query['message']['message_id']
-        user_info = callback_query.get('from', {})
-
-        # Notificar a Telegram que el callback fue recibido para quitar el "loading"
-        await self._answer_callback_query(callback_query['id'])
-
-        if not callback_data:
-            return {"status": "error", "message": "No callback data received"}
-
-        logger.info(f"Callback '{callback_data}' recibido de {user_info.get('first_name')} (chat {chat_id})")
-
-        # Enrutamiento de la acción del callback
-        if callback_data.startswith("add_cart:"):
-            sku = callback_data.split(":")[1]
-            # Eliminar el teclado del mensaje original para evitar clics duplicados
-            await self._edit_message_reply_markup(chat_id, message_id)
-            return await self._handle_add_to_cart_action(db, chat_id, sku)
-        
-        elif callback_data == "continue_shopping":
-            await self._edit_message_reply_markup(chat_id, message_id)
-            return {
-                "type": "text_messages",
-                "messages": ["¡Perfecto! ¿Qué más te gustaría buscar?"]
-            }
-
-        elif callback_data == "checkout":
-            # Eliminar el teclado del mensaje anterior
-            await self._edit_message_reply_markup(chat_id, message_id)
-            return await self._handle_checkout(chat_id, callback_query['message'])
-            
-        else:
-            logger.warning(f"Callback no reconocido: {callback_data}")
-            return {"status": "warning", "message": "unhandled_callback"}
-
-    async def _handle_add_to_cart_action(self, db: Session, chat_id: int, sku: str) -> Dict[str, Any]:
-        """
-        Añade un producto al carrito y devuelve la respuesta para ser enviada.
-        """
-        # 1. Añadir el producto al carrito
-        await self._handle_add_to_cart(chat_id=chat_id, args=[sku, '1'], db=db)
-        
-        # 2. Devolver la respuesta de confirmación con el carrito y los botones
-        return await self._create_cart_confirmation_response(
-            chat_id=chat_id,
-            initial_message="✅ ¡Producto añadido!\n\n"
-        )
-
-    async def _answer_callback_query(self, callback_query_id: str) -> None:
-        """Responde a un callback para quitar el estado 'loading' del botón en Telegram."""
-        url = f"{self.api_base_url}/answerCallbackQuery"
-        payload = {"callback_query_id": callback_query_id}
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
-        except Exception as e:
-            logger.error(f"Error respondiendo al callback query: {e}")
-            
-    async def _edit_message_reply_markup(self, chat_id: int, message_id: int, reply_markup: Optional[Dict[str, Any]] = None) -> None:
-        """Edita el teclado de un mensaje ya existente (lo elimina si no se pasa markup)."""
-        url = f"{self.api_base_url}/editMessageReplyMarkup"
-        payload = {
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "reply_markup": reply_markup or {} # Pasar un objeto vacío para eliminar el teclado
-        }
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            # Ignorar error "message is not modified" que ocurre si el teclado ya fue removido
-            if "message is not modified" not in e.response.text:
-                logger.error(f"Error HTTP editando el teclado del mensaje: {e.response.text}")
-        except Exception as e:
-            logger.error(f"Error genérico editando el teclado del mensaje: {e}")
 
     async def _create_cart_confirmation_response(self, chat_id: int, initial_message: str, cart_content: str = "") -> Dict[str, Any]:
         """Crea una respuesta estándar post-actualización de carrito."""
@@ -2062,30 +2089,16 @@ Responde en español de manera concisa pero completa.
 
         final_message = initial_message + cart_content
 
-        keyboard = {
-            "inline_keyboard": [
-                [
-                    {"text": "Seguir comprando 🛍️", "callback_data": "continue_shopping"},
-                    {"text": "Finalizar compra 💳", "callback_data": "checkout"}
-                ]
-            ]
-        }
+        # Instrucciones en texto en lugar de botones
+        instructions = (
+            "\n\n💡 Puedes seguir *buscando productos*, *ver tu carrito* (o con `/ver_carrito`)"
+            " o indicar que quieres ya *finalizar la compra* (o con `/finalizar_compra`)."
+        )
+        final_message += instructions
         
         return {
             "type": "text_messages",
-            "messages": [final_message],
-            "reply_markup": keyboard
-        }
-
-    def _create_quantity_keyboard(self, sku: str, quantity: int = 1) -> Dict[str, Any]:
-        """Crea el teclado interactivo con control de cantidad."""
-        return {
-            "inline_keyboard": [
-                [
-                    {"text": f"Agregar {quantity} {sku}", "callback_data": f"add_cart:{sku}"},
-                    {"text": "Quitar", "callback_data": f"remove_cart:{sku}"}
-                ]
-            ]
+            "messages": [final_message]
         }
 
 # ========================================
