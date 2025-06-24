@@ -58,7 +58,8 @@ from app.crud.conversation_crud import (
     update_search_context, 
     add_recent_intent, 
     set_pending_action, 
-    clear_pending_action
+    clear_pending_action,
+    get_pending_action
 )
 from app.crud.stock_crud import get_total_stock_by_sku, get_stock_by_sku
 from app.db.models.stock_model import Stock, Warehouse
@@ -440,6 +441,18 @@ class TelegramBotService:
         message_text = message.get("text", "")
         chat_id = message["chat"]["id"]
         
+        # Verificar si hay una acción pendiente (como recolección de datos del checkout)
+        pending_action_info = get_pending_action(db, chat_id)
+        if pending_action_info:
+            current_action = pending_action_info.get("action")
+            action_data = pending_action_info.get("data", {})
+            
+            # Si es una acción de recolección de datos del checkout, procesarla
+            if current_action and current_action.startswith("checkout_collect"):
+                return await self._process_checkout_data_collection(
+                    db, chat_id, message_text, current_action, action_data
+                )
+        
         # --- INICIO DE LÓGICA DE PRE-PROCESAMIENTO ---
         # Si el mensaje sigue un patrón de "qué [producto] tienes/ofreces",
         # se convierte en una búsqueda para evitar ambigüedad en la IA.
@@ -521,7 +534,7 @@ class TelegramBotService:
             elif command == '/vaciar_carrito':
                 return await self._handle_clear_cart(chat_id)
             elif command == '/finalizar_compra':
-                return await self._handle_checkout(chat_id, message_data)
+                return await self._handle_checkout(db, chat_id, message_data)
 
         # 2. Si no es un comando, proceder con el análisis de IA (código existente)
         # ... (resto del código de process_message que llama a la IA) ...
@@ -1551,8 +1564,8 @@ Responde en español de manera concisa pero completa.
                 "messages": ["Ocurrió un error inesperado. Por favor, intenta de nuevo."]
             }
         
-    async def _handle_checkout(self, chat_id: int, message_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Maneja el comando /finalizar_compra."""
+    async def _handle_checkout(self, db: Session, chat_id: int, message_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Maneja el comando /finalizar_compra con recolección de datos del cliente."""
         try:
             async with self._get_api_client() as client:
                 # 1. Verificar si el carrito está vacío
@@ -1562,77 +1575,128 @@ Responde en español de manera concisa pero completa.
                 if not cart_data.get("items"):
                     return {
                         "type": "text_messages",
-                        "messages": ["Tu carrito está vacío. No puedes finalizar una compra."]
+                        "messages": ["🛒 Tu carrito está vacío. No puedes finalizar una compra."]
                     }
 
-                # 2. Recopilar datos del cliente (versión simplificada)
-                user = message_data.get("from", {})
-                customer_name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
-                if not customer_name:
-                    customer_name = "Cliente de Telegram"
+                # 2. Mostrar resumen del carrito y comenzar recolección de datos
+                cart_summary = self._format_cart_data(cart_data)
                 
-                # En un caso real, pediríamos estos datos al usuario
-                customer_email = f"telegram_{chat_id}@example.com" # Email de ejemplo
-                shipping_address = "Por definir"
-
-                # 3. Construir el payload del pedido
-                order_items = []
-                for sku, item_details in cart_data["items"].items():
-                    product_info = json.loads(item_details['product'])
-                    order_items.append({
-                        "product_sku": sku,
-                        "quantity": item_details["quantity"],
-                        "price": product_info["price"]
-                    })
-
-                order_payload = {
-                    "chat_id": str(chat_id),
-                    "customer_name": customer_name,
-                    "customer_email": customer_email,
-                    "shipping_address": shipping_address,
-                    "items": order_items
-                }
-
-                # 4. Llamar al endpoint de checkout
-                checkout_response = await client.post(f"/cart/{chat_id}/checkout", json=order_payload)
-                checkout_response.raise_for_status()
-                order_data = checkout_response.json()
-
-                # 5. Confirmar al usuario
-                order_id = order_data.get("id")
-                total = order_data.get("total_amount", 0.0)
-                response_text = (
-                    f"🎉 *¡Pedido realizado con éxito!* 🎉\n\n"
-                    f"Gracias por tu compra, *{customer_name}*.\n\n"
-                    f"📄 *Resumen del Pedido*\n"
-                    f"   - *ID del Pedido:* `{order_id}`\n"
-                    f"   - *Total:* `${total:,.2f}`\n\n"
-                    f"Recibirás más detalles en tu correo electrónico (`{customer_email}`)."
+                # Limpiar cualquier acción pendiente anterior
+                clear_pending_action(db, chat_id)
+                
+                # Iniciar el proceso de recolección de datos
+                set_pending_action(db, chat_id, "checkout_collect_name", {})
+                
+                initial_message = (
+                    f"✅ *Proceso de Compra Iniciado*\n\n"
+                    f"{cart_summary}\n\n"
+                    f"📋 *Ahora necesito algunos datos para completar tu pedido:*\n\n"
+                    f"👤 Por favor, envíame tu *nombre completo*:"
                 )
                 
                 return {
                     "type": "text_messages",
-                    "messages": [response_text]
+                    "messages": [initial_message]
                 }
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 400:
                 return {
                     "type": "text_messages",
-                    "messages": ["Tu carrito está vacío, no se puede finalizar la compra."]
+                    "messages": ["🛒 Tu carrito está vacío, no se puede finalizar la compra."]
                 }
             else:
                 logger.error(f"Error de API en checkout para chat {chat_id}: {e}")
                 return {
                     "type": "text_messages",
-                    "messages": ["Lo siento, ocurrió un error al procesar tu pedido."]
+                    "messages": ["❌ Lo siento, ocurrió un error al procesar tu pedido."]
                 }
         except Exception as e:
             logger.error(f"Error inesperado en checkout para chat {chat_id}: {e}")
             return {
                 "type": "text_messages",
-                "messages": ["Ocurrió un error inesperado. Por favor, intenta de nuevo."]
+                "messages": ["❌ Ocurrió un error inesperado. Por favor, intenta de nuevo."]
             }
+
+    async def _process_checkout_data_collection(self, db: Session, chat_id: int, message_text: str, current_action: str, action_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Procesa la recolección de datos del cliente paso a paso."""
+        
+        if current_action == "checkout_collect_name":
+            # Validar nombre
+            name = message_text.strip()
+            if len(name) < 2:
+                return {
+                    "type": "text_messages",
+                    "messages": ["❌ Por favor, ingresa un nombre válido (mínimo 2 caracteres):"]
+                }
+            
+            # Guardar nombre y pedir email
+            action_data["name"] = name
+            set_pending_action(db, chat_id, "checkout_collect_email", action_data)
+            
+            return {
+                "type": "text_messages",
+                "messages": [f"✅ Perfecto, *{name}*\n\n📧 Ahora envíame tu *correo electrónico*:"]
+            }
+            
+        elif current_action == "checkout_collect_email":
+            # Validar email
+            email = message_text.strip().lower()
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if not re.match(email_pattern, email):
+                return {
+                    "type": "text_messages",
+                    "messages": ["❌ Por favor, ingresa un correo electrónico válido:"]
+                }
+            
+            # Guardar email y pedir teléfono
+            action_data["email"] = email
+            set_pending_action(db, chat_id, "checkout_collect_phone", action_data)
+            
+            return {
+                "type": "text_messages",
+                "messages": [f"✅ Email guardado: *{email}*\n\n📱 Ahora envíame tu *número de teléfono*:"]
+            }
+            
+        elif current_action == "checkout_collect_phone":
+            # Validar teléfono
+            phone = message_text.strip()
+            # Remover espacios y caracteres especiales para validación
+            phone_clean = re.sub(r'[^\d+]', '', phone)
+            if len(phone_clean) < 8:
+                return {
+                    "type": "text_messages",
+                    "messages": ["❌ Por favor, ingresa un número de teléfono válido:"]
+                }
+            
+            # Guardar teléfono y pedir dirección
+            action_data["phone"] = phone
+            set_pending_action(db, chat_id, "checkout_collect_address", action_data)
+            
+            return {
+                "type": "text_messages",
+                "messages": [f"✅ Teléfono guardado: *{phone}*\n\n🏠 Por último, envíame tu *dirección de envío completa*:"]
+            }
+            
+        elif current_action == "checkout_collect_address":
+            # Validar dirección
+            address = message_text.strip()
+            if len(address) < 10:
+                return {
+                    "type": "text_messages",
+                    "messages": ["❌ Por favor, ingresa una dirección más completa (mínimo 10 caracteres):"]
+                }
+            
+            # Guardar dirección y finalizar compra
+            action_data["address"] = address
+            
+            # Finalizar la compra con todos los datos recolectados
+            return await self._finalize_checkout_with_customer_data(db, chat_id, action_data)
+        
+        return {
+            "type": "text_messages",
+            "messages": ["❌ Error en el proceso de recolección de datos."]
+        }
 
     async def _handle_cart_action(self, db: Session, analysis: Dict, message_text: str, chat_id: int, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1666,7 +1730,7 @@ Responde en español de manera concisa pero completa.
             elif action == "clear":
                 return await self._handle_clear_cart(chat_id)
             elif action == "checkout":
-                return await self._handle_checkout(chat_id, message_data)
+                return await self._handle_checkout(db, chat_id, message_data)
             elif action == "add":
                 return await self._handle_natural_add_to_cart(db, analysis, chat_id)
             elif action == "remove":
@@ -1695,8 +1759,6 @@ Responde en español de manera concisa pero completa.
         """
         if not text:
             return None, ""
-        
-        import re
         
         # Patrón para capturar cantidad + referencia por número de orden
         # Ejemplos: "dame 4 del número 5", "ponme 3 del 2", "agrega 2 del numero 1"
@@ -2262,6 +2324,100 @@ Responde en español de manera concisa pero completa.
             "type": "text_messages",
             "messages": [final_message]
         }
+
+    async def _finalize_checkout_with_customer_data(self, db: Session, chat_id: int, action_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Finaliza la compra con los datos del cliente recolectados."""
+        try:
+            async with self._get_api_client() as client:
+                # 1. Verificar si el carrito está vacío
+                get_response = await client.get(f"/cart/{chat_id}")
+                get_response.raise_for_status()
+                cart_data = get_response.json()
+                if not cart_data.get("items"):
+                    clear_pending_action(db, chat_id)
+                    return {
+                        "type": "text_messages",
+                        "messages": ["🛒 Tu carrito está vacío. No se puede finalizar la compra."]
+                    }
+
+                # 2. Validar que tenemos todos los datos necesarios
+                required_fields = ["name", "email", "phone", "address"]
+                for field in required_fields:
+                    if field not in action_data:
+                        clear_pending_action(db, chat_id)
+                        return {
+                            "type": "text_messages",
+                            "messages": ["❌ Faltan datos del cliente. Por favor, inicia el proceso de compra nuevamente."]
+                        }
+
+                # 3. Construir el payload del pedido
+                order_items = []
+                for sku, item_details in cart_data["items"].items():
+                    product_info = json.loads(item_details['product'])
+                    order_items.append({
+                        "product_sku": sku,
+                        "quantity": item_details["quantity"],
+                        "price": product_info["price"]
+                    })
+
+                order_payload = {
+                    "chat_id": str(chat_id),
+                    "customer_name": action_data["name"],
+                    "customer_email": action_data["email"],
+                    "customer_phone": action_data["phone"],
+                    "shipping_address": action_data["address"],
+                    "items": order_items
+                }
+
+                # 4. Llamar al endpoint de checkout
+                checkout_response = await client.post(f"/cart/{chat_id}/checkout", json=order_payload)
+                checkout_response.raise_for_status()
+                order_data = checkout_response.json()
+
+                # 5. Limpiar acción pendiente y confirmar al usuario
+                clear_pending_action(db, chat_id)
+                
+                order_id = order_data.get("id")
+                total = order_data.get("total_amount", 0.0)
+                
+                response_text = (
+                    f"🎉 *¡Gracias por tu compra!* 🎉\n\n"
+                    f"✅ *Pedido confirmado para:* {action_data['name']}\n\n"
+                    f"📄 *Detalles del Pedido:*\n"
+                    f"   • *ID:* `{order_id}`\n"
+                    f"   • *Total:* `${total:,.2f}`\n\n"
+                    f"📧 *Confirmación enviada a:* {action_data['email']}\n"
+                    f"📱 *Teléfono de contacto:* {action_data['phone']}\n"
+                    f"🏠 *Dirección de envío:* {action_data['address']}\n\n"
+                    f"📦 *Tu pedido será procesado y enviado pronto.*\n"
+                    f"¡Gracias por confiar en nosotros!"
+                )
+                
+                return {
+                    "type": "text_messages",
+                    "messages": [response_text]
+                }
+
+        except httpx.HTTPStatusError as e:
+            clear_pending_action(db, chat_id)
+            if e.response.status_code == 400:
+                return {
+                    "type": "text_messages",
+                    "messages": ["🛒 Error en el carrito. Por favor, revisa tus productos y vuelve a intentar."]
+                }
+            else:
+                logger.error(f"Error de API en checkout final para chat {chat_id}: {e}")
+                return {
+                    "type": "text_messages",
+                    "messages": ["❌ Lo siento, ocurrió un error al procesar tu pedido. Intenta de nuevo."]
+                }
+        except Exception as e:
+            clear_pending_action(db, chat_id)
+            logger.error(f"Error inesperado en checkout final para chat {chat_id}: {e}")
+            return {
+                "type": "text_messages",
+                "messages": ["❌ Ocurrió un error inesperado. Por favor, intenta de nuevo."]
+            }
 
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO
