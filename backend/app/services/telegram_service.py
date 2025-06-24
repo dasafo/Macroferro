@@ -443,12 +443,18 @@ class TelegramBotService:
         # --- INICIO DE LÓGICA DE PRE-PROCESAMIENTO ---
         # Si el mensaje sigue un patrón de "qué [producto] tienes/ofreces",
         # se convierte en una búsqueda para evitar ambigüedad en la IA.
-        match = re.search(r"qu[eé]\s+(.+)\s+(tienes|ofreces|vendes)", message_text, re.IGNORECASE)
+        verbs = "tienes|ten[eé]is|tiene|tienen|ofreces|ofrec[eé]is|ofrece|ofrecen|vendes|vend[eé]is|vende|venden"
+        match = re.search(rf"qu[eé]\s+(.+)\s+({verbs})\b", message_text, re.IGNORECASE)
         if match:
-            product_query = match.group(1)
-            # Evitar que una pregunta como "qué tienes" se convierta en una búsqueda de "tienes"
-            if len(product_query.split()) < 4:
-                 # Reemplazar el texto del mensaje por una búsqueda explícita
+            product_query = match.group(1).strip()
+            
+            # Limpiar "productos de" si existe para una búsqueda más limpia
+            if product_query.lower().startswith("productos de "):
+                product_query = product_query[13:].strip()
+            
+            # Evitar que una pregunta vacía se convierta en una búsqueda
+            if product_query and len(product_query.split()) < 5: # Límite para evitar frases muy complejas
+                # Reemplazar el texto del mensaje por una búsqueda explícita
                 original_message = message_text
                 message_text = f"Búsqueda de producto: {product_query}"
                 logger.info(f"Mensaje original '{original_message}' transformado a '{message_text}' para desambiguación.")
@@ -582,6 +588,10 @@ Ejemplos de cart_action:
 - "Agrega esos tornillos UNC al carrito" → cart_action: "add", cart_product_reference: "esos tornillos UNC"
 - "Agrega 2 de esos tornillos métricos al carrito" → cart_action: "add", cart_quantity: 2, cart_product_reference: "esos tornillos métricos"
 - "Agrega el taladro Hilti al carrito" → cart_action: "add", cart_product_reference: "el taladro Hilti"
+- "dame 4 del número 5" → cart_action: "add", cart_quantity: 4, cart_product_reference: "número 5"
+- "ponme 3 del 2" → cart_action: "add", cart_quantity: 3, cart_product_reference: "el 2"
+- "agrega 2 del número 3" → cart_action: "add", cart_quantity: 2, cart_product_reference: "número 3"
+- "quiero 5 del 1" → cart_action: "add", cart_quantity: 5, cart_product_reference: "el 1"
 - "Quítalo del carrito" → cart_action: "remove", cart_product_reference: "eso"
 - "Quita el martillo del carrito" → cart_action: "remove", cart_product_reference: "el martillo"
 - "Quita los tornillos UNC del carrito" → cart_action: "remove", cart_product_reference: "los tornillos UNC"
@@ -600,9 +610,12 @@ Ejemplos de cart_action:
 IMPORTANTE para cart_product_reference:
 - Mantén SIEMPRE la referencia en español exactamente como la dice el usuario
 - **NUNCA incluyas números en este campo.** Los números van en el campo "cart_quantity".
+- Para referencias por orden número (ej: "del número 5", "del 2"), usa "número X" o "el X" según el usuario diga
 - Si dice "esos tornillos UNC", pon exactamente "esos tornillos UNC"
 - Si dice "el taladro Hilti", pon exactamente "el taladro Hilti"
 - Si dice "ese martillo", pon exactamente "ese martillo"
+- Si dice "del número 5", pon exactamente "número 5"
+- Si dice "del 3", pon exactamente "el 3"
 - NO traduzcas al inglés
 - Incluye marca, tipo y adjetivos demostrativos (ese, esos, el, la, etc.)
 
@@ -1673,48 +1686,71 @@ Responde en español de manera concisa pero completa.
 
     def _parse_quantity_from_text(self, text: str) -> (Optional[int], str):
         """
-        Intenta extraer una cantidad numérica (escrita en letra) del texto.
-        Devuelve la cantidad y el texto sin la palabra numérica.
+        Extrae cantidad numérica del texto y devuelve el texto limpio.
+        Maneja patrones como:
+        - "5 tornillos" -> (5, "tornillos")
+        - "Dame 4 del número 5" -> (4, "número 5")
+        - "Ponme 3 del 2" -> (3, "2")
+        - "Agrega 10 de esos" -> (10, "esos")
         """
         if not text:
-            return None, text
-
-        number_words = {
-            "un": 1, "una": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
-            "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
-            "once": 11, "doce": 12, "trece": 13, "catorce": 14, "quince": 15,
-            "dieciséis": 16, "diecisiete": 17, "dieciocho": 18, "diecinueve": 19, "veinte": 20,
-            "veintiuno": 21, "veintidós": 22, "veintitrés": 23, "veinticuatro": 24, "veinticinco": 25,
-            "veintiséis": 26, "veintisiete": 27, "veintiocho": 28, "veintinueve": 29, "treinta": 30,
-            "treinta y uno": 31, "treinta y dos": 32, "treinta y tres": 33, "treinta y cuatro": 34, "treinta y cinco": 35,
-            "treinta y seis": 36, "treinta y siete": 37, "treinta y ocho": 38, "treinta y nueve": 39, "cuarenta": 40,
-            "cuarenta y uno": 41, "cuarenta y dos": 42, "cuarenta y tres": 43, "cuarenta y cuatro": 44, "cuarenta y cinco": 45,
-            "cuarenta y seis": 46, "cuarenta y siete": 47, "cuarenta y ocho": 48, "cuarenta y nueve": 49, "cincuenta": 50
-        }
+            return None, ""
         
-        lower_text = text.lower()
-        for word_num, num_val in number_words.items():
-            # Usar regex para buscar palabras completas
-            match = re.search(rf'\b{word_num}\b', lower_text)
-            if match:
-                quantity = num_val
-                # Eliminar la palabra numérica del texto original (insensible a mayúsculas/minúsculas)
-                cleaned_text = re.sub(rf'\b{word_num}\b', '', text, count=1, flags=re.IGNORECASE).strip()
-                # Limpiar posibles dobles espacios
-                cleaned_text = re.sub(r'\s{2,}', ' ', cleaned_text)
-                
-                logger.info(f"Cantidad '{quantity}' parseada desde el texto. Nuevo texto de referencia: '{cleaned_text}'")
+        import re
+        
+        # Patrón para capturar cantidad + referencia por número de orden
+        # Ejemplos: "dame 4 del número 5", "ponme 3 del 2", "agrega 2 del numero 1"
+        order_pattern = r'(?:dame|ponme|agrega|añade|quiero)\s*(\d+)\s*(?:del?|de)\s*(?:número|numero)?\s*(\d+)'
+        order_match = re.search(order_pattern, text.lower())
+        
+        if order_match:
+            quantity = int(order_match.group(1))
+            order_number = order_match.group(2)
+            # Construir referencia limpia
+            reference = f"número {order_number}"
+            logger.info(f"Patrón de cantidad + orden detectado: {quantity} del {reference}")
+            return quantity, reference
+        
+        # Patrón general para cantidad seguida de producto
+        # Ejemplos: "5 tornillos", "10 de esos", "3 martillos"
+        general_pattern = r'(?:dame|ponme|agrega|añade|quiero)?\s*(\d+)\s*(?:de\s+)?(.+)'
+        general_match = re.search(general_pattern, text.lower())
+        
+        if general_match:
+            quantity_str = general_match.group(1)
+            remaining_text = general_match.group(2).strip()
+            
+            try:
+                quantity = int(quantity_str)
+                logger.info(f"Cantidad extraída: {quantity}, texto restante: '{remaining_text}'")
+                return quantity, remaining_text
+            except ValueError:
+                pass
+        
+        # Si no se encuentra patrón específico, buscar el primer número
+        number_match = re.search(r'\b(\d+)\b', text)
+        if number_match:
+            try:
+                quantity = int(number_match.group(1))
+                # Remover el número del texto
+                cleaned_text = re.sub(r'\b' + re.escape(number_match.group(1)) + r'\b', '', text, count=1).strip()
+                # Limpiar espacios extra y palabras comunes al inicio
+                cleaned_text = re.sub(r'^(?:de|del|la|el|los|las)\s+', '', cleaned_text.strip())
+                logger.info(f"Número encontrado: {quantity}, texto limpio: '{cleaned_text}'")
                 return quantity, cleaned_text
+            except ValueError:
+                pass
         
+        logger.info(f"No se encontró cantidad en: '{text}'")
         return None, text
 
     async def _handle_natural_add_to_cart(self, db: Session, analysis: Dict, chat_id: int) -> Dict[str, Any]:
         """
-        Maneja agregar productos al carrito usando lenguaje natural.
+        Maneja añadir productos al carrito usando lenguaje natural.
         """
         product_reference = analysis.get("cart_product_reference", "")
         quantity = analysis.get("cart_quantity")
-        
+
         # Si la IA no extrajo la cantidad, intentar parsearla desde el texto
         if not quantity and product_reference:
             parsed_quantity, cleaned_reference = self._parse_quantity_from_text(product_reference)
@@ -1764,13 +1800,17 @@ Responde en español de manera concisa pero completa.
         # Usar la función existente de agregar al carrito
         response = await self._handle_add_to_cart(chat_id, [sku, str(quantity)], db)
         
-        # Envolver la respuesta para añadir el teclado de post-compra
-        if response.get("type") == "text_messages":
-            return await self._create_cart_confirmation_response(
-                chat_id=chat_id,
-                initial_message="✅ *Producto añadido*\n",
-                cart_content=response["messages"][0]
+        # NO usar _create_cart_confirmation_response porque _handle_add_to_cart ya retorna un mensaje completo
+        # Solo añadir las instrucciones adicionales al final del mensaje existente
+        if response.get("type") == "text_messages" and response.get("messages"):
+            # Agregar las instrucciones al final del mensaje existente
+            original_message = response["messages"][0]
+            instructions = (
+                "\n\n💡 Puedes seguir *buscando productos*, *ver tu carrito* (o con `/ver_carrito`)"
+                " o indicar que quieres ya *finalizar la compra* (o con `/finalizar_compra`)."
             )
+            response["messages"][0] = original_message + instructions
+        
         return response
 
     async def _handle_natural_remove_from_cart(self, db: Session, analysis: Dict, chat_id: int) -> Dict[str, Any]:
@@ -1884,13 +1924,34 @@ Responde en español de manera concisa pero completa.
         """
         Resuelve una referencia de producto a un SKU. La estrategia cambia según el contexto de la acción.
         - 'remove'/'update': Busca la referencia EXCLUSIVAMENTE dentro del carrito.
-        - 'add': Busca primero en el contexto (carrito + recientes) para resolver referencias relativas, luego semánticamente.
-        - 'search': Busca en el contexto de productos recientes y luego semánticamente.
+        - 'add'/'product_inquiry'/'search': Busca primero en el contexto (carrito + recientes) para resolver referencias relativas, luego semánticamente.
         """
         if not reference:
             return ""
 
-        # --- PASO 0: MANEJO DE REFERENCIAS CONTEXTUALES DIRECTAS ---
+        # --- PASO 0: MANEJO DE REFERENCIAS POR NÚMERO DE ORDEN ---
+        # Detectar referencias como "número 5", "el 5", "del 5", etc.
+        import re
+        number_pattern = r'(?:número|numero|del|el)\s*(\d+)|^(\d+)$'
+        number_match = re.search(number_pattern, reference.lower().strip())
+        
+        if number_match:
+            order_number = int(number_match.group(1) or number_match.group(2))
+            logger.info(f"Referencia por número de orden detectada: {order_number}")
+            
+            # Obtener productos recientes en orden
+            recent_skus = get_recent_products(db, chat_id, limit=20)
+            if recent_skus and 1 <= order_number <= len(recent_skus):
+                selected_sku = recent_skus[order_number - 1]  # Convertir a índice 0-based
+                product = get_product_by_sku(db, selected_sku)
+                if product:
+                    logger.info(f"Referencia por número {order_number} resuelta a: {product.name} ({selected_sku})")
+                    return selected_sku
+            else:
+                logger.warning(f"Número de orden {order_number} fuera de rango. Productos disponibles: {len(recent_skus) if recent_skus else 0}")
+                return ""
+
+        # --- PASO 1: MANEJO DE REFERENCIAS CONTEXTUALES DIRECTAS ---
         # Palabras que casi siempre se refieren al último producto visto.
         demonstrative_references = [
             "este", "esta", "estos", "estas",
@@ -1903,86 +1964,163 @@ Responde en español de manera concisa pero completa.
         # Limpiar la referencia de palabras comunes para una comparación más limpia.
         clean_reference = reference.lower().replace("de ", "").strip()
         
-        # Si la referencia es una de estas palabras y la acción es sobre el carrito,
-        # asumir que se refiere al producto más reciente.
-        if clean_reference in demonstrative_references and action_context in ['add', 'remove', 'update']:
+        # Si la referencia es una de estas palabras, buscar el producto más reciente
+        if clean_reference in demonstrative_references:
             logger.info(f"Referencia contextual directa detectada: '{reference}'. Resolviendo al producto más reciente.")
             recent_skus = get_recent_products(db, chat_id, limit=1)
             if recent_skus:
-                # Se encontró el producto más reciente, devolver su SKU directamente.
-                return recent_skus[0]
-            else:
-                # No hay contexto reciente, la referencia es ambigua.
-                logger.warning(f"Referencia contextual '{reference}' usada sin un producto reciente en el contexto.")
-                return ""
-
-        candidates = []
-        
-        # --- PASO 1: Obtener el contexto del carrito y productos recientes ---
-        cart_skus = []
-        try:
-            async with self._get_api_client() as client:
-                response = await client.get(f"/cart/{chat_id}")
-                if response.status_code == 200:
-                    cart_skus = list(response.json().get("items", {}).keys())
-        except Exception as e:
-            logger.error(f"No se pudo obtener el carrito para resolver referencia: {e}")
-
-        recent_skus = get_recent_products(db, chat_id, limit=15)
-        
-        # --- PASO 2: Determinar el alcance de la búsqueda según el contexto de la acción ---
-        skus_to_check_in_context = []
-        if action_context in ['remove', 'update']:
-            # Para quitar o actualizar, SOLO nos importa lo que hay en el carrito.
-            skus_to_check_in_context = cart_skus
-            if not cart_skus:
-                logger.warning(f"Intento de '{action_context}' en un carrito vacío para referencia: '{reference}'")
-                return ""
-        elif action_context == 'add':
-            # Para añadir, consideramos el carrito (para referencias como "ese") y los productos recientes.
-            skus_to_check_in_context = cart_skus + [sku for sku in recent_skus if sku not in cart_skus]
-        elif action_context == 'search':
-            # Para una búsqueda pura, solo nos importa el contexto reciente.
-            skus_to_check_in_context = recent_skus
-
-        # --- PASO 3: Buscar coincidencias en el contexto determinado ---
-        if skus_to_check_in_context:
-            for sku in skus_to_check_in_context:
-                product = db.query(Product).filter(Product.sku == sku).first()
-                if product and self._matches_reference(product, reference):
-                    if not any(p.sku == product.sku for p in candidates):
-                        candidates.append(product)
-
-        # --- PASO 4: Si no hay candidatos, realizar búsqueda semántica (no aplica a remove/update) ---
-        if not candidates and action_context not in ['remove', 'update']:
-            logger.info(f"Referencia '{reference}' no encontrada en contexto. Realizando búsqueda semántica.")
-            search_results = await self.product_service.search_products(db, reference, top_k=5)
-            main_results = search_results.get("main_results", [])
-            for p_schema in main_results:
-                product = get_product_by_sku(db, p_schema.sku)
-                if product and self._matches_reference(product, reference):
-                    if not any(p.sku == product.sku for p in candidates):
-                        candidates.append(product)
-        
-        # --- PASO 5: Resolver ambigüedad y devolver el mejor resultado ---
-        if not candidates:
-            logger.warning(f"No se pudo resolver la referencia a producto para '{reference}' (contexto: {action_context}).")
+                # Para acciones que requieren verificación de existencia
+                if action_context in ['add', 'product_inquiry']:
+                    product = get_product_by_sku(db, recent_skus[0])
+                    if product:
+                        logger.info(f"Referencia '{reference}' resuelta a producto reciente: {product.name} ({recent_skus[0]})")
+                        return recent_skus[0]
+                else:
+                    # Para otras acciones, confiar en que el contexto es correcto
+                    return recent_skus[0]
+            logger.warning(f"No hay productos recientes disponibles para resolver la referencia '{reference}'")
             return ""
-        
-        # Si solo hay un candidato posible, es inequívoco.
-        if len(candidates) == 1:
-            logger.info(f"Referencia '{reference}' resuelta inequívocamente a SKU: {candidates[0].sku}")
-            return candidates[0].sku
 
-        # Si hay múltiples candidatos, la lógica depende del contexto.
+        # --- PASO 2: BÚSQUEDA EXACTA POR SKU ---
+        if reference.upper().startswith(('PET', 'HAR', 'HIL', 'BOA', 'DEW')):  # Prefijos comunes de SKU
+            product = get_product_by_sku(db, reference.upper())
+            if product:
+                logger.info(f"SKU exacto encontrado: {product.name} ({reference.upper()})")
+                return reference.upper()
+
+        # --- PASO 3: BÚSQUEDA EN EL CARRITO (para remove/update) ---
         if action_context in ['remove', 'update']:
-            # En el contexto de eliminar/actualizar, la ambigüedad debe ser resuelta por el usuario.
-            logger.warning(f"Referencia ambigua para '{reference}' en el carrito: {[p.name for p in candidates]}")
-            ambiguous_info = ";".join([f"{p.sku}:{p.name}" for p in candidates])
-            return f"AMBIGUOUS_REFERENCE|{ambiguous_info}"
+            try:
+                async with self._get_api_client() as client:
+                    cart_response = await client.get(f"/cart/{chat_id}")
+                    cart_response.raise_for_status()
+                    cart_data = cart_response.json()
+                    cart_items = cart_data.get("items", {})
+                    
+                    if not cart_items:
+                        logger.info(f"Carrito vacío para acción {action_context}")
+                        return ""
+                    
+                    # Buscar en productos del carrito
+                    cart_products = []
+                    for sku, item_details in cart_items.items():
+                        try:
+                            product_info = json.loads(item_details['product'])
+                            # Crear un objeto similar a Product para reutilizar _matches_reference
+                            pseudo_product = type('Product', (), {
+                                'sku': sku,
+                                'name': product_info.get('name', ''),
+                                'brand': product_info.get('brand', ''),
+                                'category_name': product_info.get('category_name', ''),
+                                'description': product_info.get('description', '')
+                            })()
+                            cart_products.append(pseudo_product)
+                        except (json.JSONDecodeError, KeyError) as e:
+                            logger.warning(f"Error parseando producto del carrito {sku}: {e}")
+                            continue
+                    
+                    # Buscar coincidencias en el carrito
+                    matching_cart_products = []
+                    for product in cart_products:
+                        if self._matches_reference(product, reference):
+                            matching_cart_products.append(product)
+                            logger.info(f"Coincidencia en carrito: {product.name} ({product.sku}) para '{reference}'")
+                    
+                    if len(matching_cart_products) == 1:
+                        return matching_cart_products[0].sku
+                    elif len(matching_cart_products) > 1:
+                        return self._resolve_ambiguous_reference(matching_cart_products, reference)
+                    else:
+                        logger.info(f"No se encontraron coincidencias para '{reference}' en el carrito")
+                        return ""
+                        
+            except Exception as e:
+                logger.error(f"Error accediendo al carrito para resolución de referencia: {e}")
+                return ""
 
-        # Para otros contextos (add, search), intentar resolver con el mejor candidato.
-        return self._resolve_ambiguous_reference(candidates, reference)
+        # --- PASO 4: BÚSQUEDA EN PRODUCTOS RECIENTES ---
+        if action_context in ['add', 'search', 'product_inquiry']:
+            recent_skus = get_recent_products(db, chat_id, limit=10)
+            if recent_skus:
+                recent_products = []
+                for sku in recent_skus:
+                    product = get_product_by_sku(db, sku)
+                    if product:
+                        recent_products.append(product)
+                
+                # Buscar coincidencias en productos recientes
+                matching_recent = []
+                for product in recent_products:
+                    if self._matches_reference(product, reference):
+                        matching_recent.append(product)
+                        logger.info(f"Coincidencia en recientes: {product.name} ({product.sku}) para '{reference}'")
+                
+                if len(matching_recent) == 1:
+                    logger.info(f"Producto resuelto desde recientes: {matching_recent[0].name} ({matching_recent[0].sku})")
+                    return matching_recent[0].sku
+                elif len(matching_recent) > 1:
+                    # Para múltiples coincidencias en recientes, usar el más reciente (primera posición)
+                    logger.info(f"Múltiples coincidencias en recientes, usando el más reciente: {matching_recent[0].name}")
+                    return matching_recent[0].sku
+
+        # --- PASO 5: BÚSQUEDA SEMÁNTICA EN TODA LA BASE DE DATOS ---
+        if action_context in ['add', 'search', 'product_inquiry']:
+            logger.info(f"Iniciando búsqueda semántica para '{reference}'")
+            try:
+                # Buscar productos que coincidan semánticamente
+                search_terms = reference.lower().split()
+                
+                # Filtrar términos muy cortos o comunes que no son útiles para búsqueda
+                filtered_terms = [term for term in search_terms if len(term) > 2 and term not in ['de', 'del', 'la', 'el', 'los', 'las', 'para', 'con', 'en']]
+                
+                if not filtered_terms:
+                    logger.warning(f"No hay términos útiles para búsqueda en '{reference}'")
+                    return ""
+                
+                # Usar ILIKE para búsqueda semántica más flexible
+                from sqlalchemy import or_
+                conditions = []
+                for term in filtered_terms:
+                    conditions.extend([
+                        Product.name.ilike(f"%{term}%"),
+                        Product.description.ilike(f"%{term}%"),
+                        Product.brand.ilike(f"%{term}%"),
+                        Product.sku.ilike(f"%{term}%")
+                    ])
+                
+                if not conditions:
+                    return ""
+                
+                semantic_products = db.query(Product).filter(or_(*conditions)).limit(20).all()
+                
+                if not semantic_products:
+                    logger.info(f"No se encontraron productos semánticamente para '{reference}'")
+                    return ""
+                
+                # Filtrar usando _matches_reference para encontrar las mejores coincidencias
+                matching_semantic = []
+                for product in semantic_products:
+                    if self._matches_reference(product, reference):
+                        matching_semantic.append(product)
+                        logger.info(f"Coincidencia semántica: {product.name} ({product.sku}) para '{reference}'")
+                
+                if len(matching_semantic) == 1:
+                    logger.info(f"Producto resuelto semánticamente: {matching_semantic[0].name} ({matching_semantic[0].sku})")
+                    return matching_semantic[0].sku
+                elif len(matching_semantic) > 1:
+                    # Si hay múltiples coincidencias semánticas, requerir más especificidad
+                    logger.info(f"Múltiples coincidencias semánticas encontradas para '{reference}', requiere mayor especificidad")
+                    return self._resolve_ambiguous_reference(matching_semantic, reference)
+                else:
+                    logger.info(f"Productos encontrados semánticamente pero ninguno coincide con '{reference}'")
+                    return ""
+                    
+            except Exception as e:
+                logger.error(f"Error en búsqueda semántica para '{reference}': {e}")
+                return ""
+
+        logger.warning(f"No se pudo resolver la referencia '{reference}' en contexto '{action_context}'")
+        return ""
 
     def _resolve_ambiguous_reference(self, candidates: List[Product], reference: str) -> str:
         """
@@ -2027,39 +2165,63 @@ Responde en español de manera concisa pero completa.
         Verifica si un producto coincide con una referencia textual.
         Mejorado para manejar mejor las coincidencias de marca y tipo.
         """
-        reference_lower = reference.lower()
+        reference_lower = reference.lower().strip()
+        
+        # Casos especiales: referencias demostrativas
+        demonstrative_only = [
+            "este", "esta", "estos", "estas", "ese", "esa", "esos", "esas",
+            "aquel", "aquella", "aquellos", "aquellas", "eso", "esto",
+            "el último", "la última", "los últimos", "las últimas"
+        ]
+        
+        # Si la referencia es solo un demostrativo, coincide con cualquier producto
+        if reference_lower in demonstrative_only:
+            logger.info(f"Referencia demostrativa '{reference}' coincide con cualquier producto: {product.name}")
+            return True
         
         # Limpiar la referencia de artículos y preposiciones
         reference_words = [word for word in reference_lower.split() 
-                          if word not in ["el", "la", "los", "las", "de", "del", "para", "con", "sin"]]
+                          if word not in ["el", "la", "los", "las", "de", "del", "para", "con", "sin", 
+                                         "este", "esta", "estos", "estas", "ese", "esa", "esos", "esas"]]
         
+        # Si después de limpiar no quedan palabras significativas, coincide con cualquier producto
         if not reference_words:
-            return False
+            logger.info(f"Referencia '{reference}' sin palabras significativas, coincide con: {product.name}")
+            return True
 
         product_text = f"{product.name} {product.description or ''} {getattr(product, 'brand', '') or ''}".lower()
         
         # Verificar si las palabras clave coinciden
         matches = 0
+        total_words = len(reference_words)
+        
         for word in reference_words:
-            # Comprobar si la palabra original o su forma singular (simple) están en el texto del producto
+            # Comprobar si la palabra original está en el texto del producto
             if word in product_text:
                 matches += 1
                 continue
             
             # Intentar con una forma singular simple
-            if word.endswith('s') and word[:-1] in product_text:
+            if word.endswith('s') and len(word) > 3 and word[:-1] in product_text:
                 matches += 1
                 continue
             
-            if word.endswith('es') and word[:-2] in product_text:
+            if word.endswith('es') and len(word) > 4 and word[:-2] in product_text:
                 matches += 1
                 continue
-
-        # Para referencias cortas (1-2 palabras), requerir al menos 1 coincidencia
-        # Para referencias más largas, requerir al menos 2 coincidencias
-        required_matches = 1 if len(reference_words) <= 2 else 2
         
-        return matches >= required_matches
+        # Calcular el porcentaje de coincidencia
+        match_ratio = matches / total_words if total_words > 0 else 0
+        
+        # Para referencias cortas (1-2 palabras), requerir al menos 1 coincidencia
+        # Para referencias más largas, requerir al menos 50% de coincidencia
+        if total_words <= 2:
+            result = matches >= 1
+        else:
+            result = match_ratio >= 0.5
+        
+        logger.info(f"Coincidencia para '{reference}' con {product.name}: {matches}/{total_words} palabras ({match_ratio:.2%}) = {'SÍ' if result else 'NO'}")
+        return result
 
     def _get_stock_status(self, total_quantity: int) -> str:
         if total_quantity > 10:
