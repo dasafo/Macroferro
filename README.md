@@ -29,11 +29,14 @@
 
 -   **🤖 Bot de Telegram Inteligente:** Interfaz conversacional para búsqueda y pedidos
 -   **🛒 Carrito de Compras Completo:** Gestión de productos, cantidades y checkout
+-   **👥 Gestión de Clientes:** Reconocimiento de clientes recurrentes y registro automático
 -   **🔍 Búsqueda Semántica:** Encuentra productos usando lenguaje natural
 -   **📦 Gestión de Inventario:** Control de stock en tiempo real
 -   **🚀 API REST Completa:** Documentación automática con FastAPI
 -   **🔐 Seguridad Robusta:** Autenticación y autorización integradas
 -   **🌐 Webhook HTTPS:** Integración segura con Telegram mediante Cloudflare
+-   **Webhooks de Telegram gestionados** de forma segura con `python-telegram-bot`
+-   **Validación de datos de entrada** con Pydantic para robustez
 
 ## Estado Actual del Proyecto: **FASE 2 COMPLETADA** 🚀
 
@@ -124,6 +127,50 @@ backend/
 - ✅ **Respuestas contextuales** con información de productos
 - ✅ **Manejo de imágenes** y detalles de productos
 - ✅ **Comandos de carrito** completamente integrados
+
+### ✅ **FASE 1.5: Indexación Semántica con IA** - **COMPLETADA**
+
+Se ha desarrollado un sistema robusto para la indexación de productos en la base de datos vectorial Qdrant.
+
+**Funcionalidades Clave:**
+- ✅ **Script de Indexación (`scripts/index_qdrant_data.py`):**
+  - **Conexión multi-servicio:** PostgreSQL, Redis, Qdrant y OpenAI
+  - **Enriquecimiento con LLM:** Genera descripciones de marketing optimizadas usando `gpt-4o-mini-2024-07-18`
+  - **Caché Inteligente:** Utiliza Redis para cachear las descripciones generadas
+  - **Generación de Embeddings:** Convierte información en vectores semánticos con `text-embedding-3-small`
+  - **Indexación en Qdrant:** Almacena productos como puntos vectoriales en `macroferro_products`
+  - **Gestión de Estado:** Solo procesa productos nuevos o modificados
+- ✅ **Comando `Makefile` (`make update-catalog`):** Ejecuta todo el proceso de indexación
+- ✅ **Script de Prueba (`scripts/test_semantic_search.py`):** Valida la calidad de los resultados
+- ✅ **Colección Indexada:** **200 productos** completamente vectorizados y listos para búsqueda
+
+### ✅ **FASE 2: Bot de Telegram con IA y Carrito de Compras Integrado** - **COMPLETADA** 🎉
+
+Se ha finalizado la integración completa del bot de Telegram, permitiendo una interacción fluida desde la búsqueda de productos hasta la finalización de la compra.
+
+**Funcionalidades Clave:**
+- ✅ **Conversación Inteligente:** El bot comprende lenguaje natural para buscar productos, gestionar el carrito y finalizar compras.
+- ✅ **Gestión Completa del Carrito:** Los usuarios pueden agregar, ver, eliminar y vaciar su carrito con comandos o lenguaje natural.
+- ✅ **Proceso de Checkout Asistido:** El bot guía al usuario para recolectar los datos necesarios para el envío.
+- ✅ **Integración con API Backend:** El bot consume los endpoints de FastAPI para obtener datos de productos y gestionar el carrito en Redis.
+- ✅ **Seguridad en Webhooks:** La comunicación con Telegram está asegurada mediante un token secreto.
+
+### ✅ **FASE 2.5: Gestión de Clientes y Flujo de Compra Mejorado** - **COMPLETADA** 🚀
+
+Hemos añadido una capa de inteligencia en el proceso de compra para mejorar la experiencia de clientes nuevos y recurrentes.
+
+**Mejoras Implementadas:**
+- ✅ **Reconocimiento de Clientes Recurrentes:**
+  - Al finalizar la compra, el bot pregunta al usuario si ya es cliente.
+  - Si el usuario confirma, se le pide el email para buscar sus datos.
+  - Si se encuentran, se autocompletan los datos de envío, agilizando el proceso.
+- ✅ **Registro Automático de Nuevos Clientes:**
+  - Si un usuario realiza una compra por primera vez, sus datos se guardan automáticamente en la base de datos de clientes.
+  - El sistema genera un `client_id` secuencial y consistente (`CUSTXXXX`).
+- ✅ **Flujo de Conversación Flexible:**
+  - El bot ahora puede manejar interrupciones. Si un usuario hace una pregunta no relacionada durante el proceso de pago, el bot responderá y luego permitirá continuar con la compra.
+- ✅ **Modelo y CRUD de Clientes:**
+  - Se ha implementado el modelo `Client` y las funciones CRUD para interactuar con la base de datos.
 
 ### ✅ **FASE 1.5: Indexación Semántica con IA** - **COMPLETADA**
 
@@ -239,6 +286,7 @@ Se ha desarrollado un sistema robusto para la indexación de productos en la bas
 - [x] **API de categorías** (CRUD completo con jerarquías)
 - [x] **API de carrito** (CRUD completo con persistencia en Redis)
 - [x] **API de órdenes** (creación y gestión de pedidos)
+- [x] **API de clientes** (CRUD básico y lógica de negocio integrada)
 - [x] **Búsqueda semántica** (Qdrant + OpenAI embeddings)
 - [x] **Bot de Telegram** (interfaz conversacional completamente integrada)
 - [x] **Sistema de carrito** (agregar, modificar, eliminar, checkout)
@@ -252,7 +300,7 @@ Se ha desarrollado un sistema robusto para la indexación de productos en la bas
 ### 🚧 **Módulos en Preparación**
 - [ ] **API de imágenes** (gestión de archivos)
 - [ ] **API de inventario** (stock y almacenes)
-- [ ] **API de clientes** (gestión B2B)
+- [ ] **Gestión de Clientes Avanzada** (historial, perfiles B2B)
 - [ ] **API de facturación** (seguimiento de órdenes y pagos)
 - [ ] **Sistema de autenticación** (JWT, roles)
 - [ ] **Dashboard administrativo** (gestión web)
@@ -469,7 +517,7 @@ POST /api/v1/cart/{chat_id}/checkout
 - **200 productos** indexados con embeddings vectoriales
 - **33 categorías** con estructura jerárquica
 - **7 imágenes únicas** con 200 asociaciones producto-imagen
-- **11 clientes B2B** con información de contacto
+- **13 clientes B2B** con información de contacto (incluyendo recurrentes)
 - **3 almacenes** con ubicaciones
 - **600+ registros de stock** distribuidos
 - **51 facturas** con 31 items de prueba
