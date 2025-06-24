@@ -15,6 +15,7 @@ import asyncio
 import json
 import sys
 import os
+import traceback
 from typing import Dict, Any, List
 from datetime import datetime
 
@@ -50,7 +51,6 @@ class TelegramBotTester:
             
         except Exception as e:
             print(f"❌ Error al inicializar servicios: {e}")
-            import traceback
             print(traceback.format_exc())
             return False
         
@@ -143,6 +143,21 @@ class TelegramBotTester:
                 "messages": [f"Error: {str(e)}"]
             }
     
+    async def test_conversation(self, message: str, expected_keywords: List[str], test_name: str = "Test conversacional"):
+        """Función genérica para testear una única interacción conversacional."""
+        self.print_test_start(test_name, message)
+        response = await self.simulate_message(message)
+        self.print_response(response)
+        
+        success = False
+        if response.get("type") != "error" and response.get("messages"):
+            response_text = " ".join(map(str, response["messages"])).lower()
+            if all(keyword.lower() in response_text for keyword in expected_keywords):
+                success = True
+        
+        self.mark_test_result(success, f"- Debe contener: {', '.join(expected_keywords)}")
+        await asyncio.sleep(DELAY_BETWEEN_TESTS)
+
     async def test_natural_conversation_start(self):
         """Test de inicio de conversación natural"""
         self.print_header("INICIO DE CONVERSACIÓN NATURAL")
@@ -361,31 +376,36 @@ class TelegramBotTester:
             return
             
         try:
-            # Ejecutar todos los grupos de tests naturales
-            await self.test_natural_conversation_start()
-            await asyncio.sleep(DELAY_BETWEEN_TESTS)
-            
-            await self.test_real_product_searches()
-            await asyncio.sleep(DELAY_BETWEEN_TESTS)
-            
-            await self.test_natural_cart_interaction()
-            await asyncio.sleep(DELAY_BETWEEN_TESTS)
-            
-            await self.test_product_by_number_reference()
-            await asyncio.sleep(DELAY_BETWEEN_TESTS)
-            
-            await self.test_natural_checkout_flow()
-            await asyncio.sleep(DELAY_BETWEEN_TESTS)
-            
-            await self.test_customer_service_conversation()
-            await asyncio.sleep(DELAY_BETWEEN_TESTS)
-            
+            # Ejecutar todas las pruebas de conversación
             await self.test_realistic_conversation_flow()
             
+            print("\\n--- PRUEBA 22: Conversación de un cliente nuevo finalizando la compra ---")
+            await self.test_conversation(
+                message="quiero finalizar la compra",
+                expected_keywords=[
+                    "Proceso de Compra Iniciado",
+                    "¿ya eres cliente nuestro?"
+                ],
+                test_name="Iniciar compra como nuevo cliente"
+            )
+            await self.test_conversation(
+                message="no",
+                expected_keywords=[
+                    "Entendido. Comencemos con el registro.",
+                    "Por favor, envíame tu nombre completo"
+                ],
+                test_name="Confirmar que no es cliente"
+            )
+            # Usar un email nuevo que no esté en la base de datos
+            new_customer_email = "cliente.nuevo@email-test.com"
+            await self.test_conversation("Cliente Nuevo Test", ["Ahora envíame tu correo electrónico"], "Ingresar nombre")
+            await self.test_conversation(new_customer_email, ["Ahora envíame tu número de teléfono"], "Ingresar email nuevo")
+            await self.test_conversation("123456789", ["Por último, envíame tu dirección de envío completa"], "Ingresar teléfono")
+            await self.test_conversation("Calle Falsa 123, Ciudad Test", ["¡Gracias por tu compra!"], "Ingresar dirección y finalizar")
+            
         except Exception as e:
-            print(f"\n❌ ERROR CRÍTICO durante las conversaciones: {e}")
-            import traceback
-            print(traceback.format_exc())
+            print(f"\\n❌ ERROR CRÍTICO durante las conversaciones: {e}")
+            traceback.print_exc()
             self.failed_tests += 1
             
         finally:

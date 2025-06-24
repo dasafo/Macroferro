@@ -442,17 +442,23 @@ class TelegramBotService:
         message_text = message.get("text", "")
         chat_id = message["chat"]["id"]
         
-        # Verificar si hay una acción pendiente (como recolección de datos del checkout)
+        # Verificar si hay una acción pendiente
         pending_action_info = get_pending_action(db, chat_id)
         if pending_action_info:
             current_action = pending_action_info.get("action")
             action_data = pending_action_info.get("data", {})
             
-            # Si es una acción de recolección de datos del checkout, procesarla
+            # Si es una acción del checkout, intentar procesarla
             if current_action and current_action.startswith("checkout"):
-                return await self._process_checkout_data_collection(
+                checkout_response = await self._process_checkout_data_collection(
                     db, chat_id, message_text, current_action, action_data
                 )
+                
+                # Si el procesador del checkout devolvió una respuesta, la enviamos.
+                # Si devolvió None, significa que el mensaje era una interrupción
+                # y debemos dejar que el flujo principal de la IA lo maneje.
+                if checkout_response:
+                    return checkout_response
         
         # --- INICIO DE LÓGICA DE PRE-PROCESAMIENTO ---
         # Si el mensaje sigue un patrón de "qué [producto] tienes/ofreces",
@@ -1610,9 +1616,50 @@ Responde en español de manera concisa pero completa.
                 "messages": ["❌ Ocurrió un error inesperado. Por favor, intenta de nuevo."]
             }
 
-    async def _process_checkout_data_collection(self, db: Session, chat_id: int, message_text: str, current_action: str, action_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Procesa la recolección de datos del cliente paso a paso."""
+    def _is_interrupting_message(self, text: str) -> bool:
+        """
+        Checks if a message is a command or a clear question that should interrupt a flow.
+        This is a heuristic to allow users to ask questions mid-flow.
+        """
+        text_lower = text.strip().lower()
         
+        # Obvious interruptions
+        if text_lower.startswith('/'):
+            return True
+        if '?' in text:
+            return True
+            
+        # Keywords that strongly suggest a new question, not an answer
+        question_words = [
+            'qué', 'cual', 'cuál', 'cómo', 'donde', 'dónde',
+            'quien', 'quién', 'cuanto', 'cuánto', 'cuando', 'cuándo', 'por qué'
+        ]
+        if text_lower.split() and text_lower.split()[0] in question_words:
+            return True
+
+        # Common informational queries that are not direct answers
+        informational_keywords = [
+            'ayuda', 'info', 'marcas', 'diferencia', 'envío', 'envíos', 'sirve para'
+        ]
+        if any(keyword in text_lower for keyword in informational_keywords):
+            # To avoid false positives on things like "sí, sirve para...", check length.
+            # If it's a short phrase with a keyword, it's likely an interruption.
+            if len(text_lower.split()) < 6:
+                return True
+
+        return False
+
+    async def _process_checkout_data_collection(self, db: Session, chat_id: int, message_text: str, current_action: str, action_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Procesa la recolección de datos del cliente paso a paso.
+        Devuelve None si el mensaje parece una interrupción y no una respuesta.
+        """
+        
+        # Primero, comprobar si el usuario está intentando hacer otra cosa
+        if self._is_interrupting_message(message_text):
+            logger.info(f"Mensaje '{message_text}' detectado como interrupción del flujo de checkout.")
+            return None
+
         user_response = message_text.strip().lower()
 
         if current_action == "checkout_ask_if_recurrent":
@@ -2430,7 +2477,21 @@ Responde en español de manera concisa pero completa.
                 checkout_response.raise_for_status()
                 order_data = checkout_response.json()
 
-                # 5. Limpiar acción pendiente y confirmar al usuario
+                # 5. Si es un cliente nuevo, guardarlo en la BBDD
+                if not get_client_by_email(db, action_data["email"]):
+                    logger.info(f"Cliente con email {action_data['email']} no encontrado. Intentando crear nuevo cliente...")
+                    create_client(
+                        db,
+                        name=action_data["name"],
+                        email=action_data["email"],
+                        phone=action_data["phone"],
+                        address=action_data["address"]
+                    )
+                    logger.info(f"Nuevo cliente con email {action_data['email']} guardado exitosamente.")
+                else:
+                    logger.info(f"El cliente con email {action_data['email']} ya existe. No se crea un nuevo registro.")
+
+                # 6. Limpiar acción pendiente y confirmar al usuario
                 clear_pending_action(db, chat_id)
                 
                 order_id = order_data.get("id")
