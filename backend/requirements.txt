@@ -12,3 +12,7 @@ passlib[bcrypt]
 python-multipart
 aiohttp>=3.8.0
 httpx>=0.24.0
+python-jose[cryptography]
+tenacity
+fastapi-mail
+weasyprint

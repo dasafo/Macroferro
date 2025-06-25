@@ -9,7 +9,16 @@ WORKDIR /app
 # Copiar el archivo de requerimientos primero para aprovechar el cache de Docker
 COPY ./requirements.txt /app/requirements.txt
 
-# Instalar las dependencias
+# Instalar dependencias del sistema para WeasyPrint (PDF generation)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libpango-1.0-0 \
+    libharfbuzz0b \
+    libpangoft2-1.0-0 \
+    libgdk-pixbuf2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Instalar las dependencias de Python
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 

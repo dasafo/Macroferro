@@ -77,7 +77,8 @@ async def telegram_webhook(
             process_and_respond_multiple,
             update_data,
             telegram_service,
-            db
+            db,
+            background_tasks
         )
         logger.info(f"Update de Telegram agregado a la cola de procesamiento.")
         
@@ -89,7 +90,12 @@ async def telegram_webhook(
         logger.error(f"Error inesperado en webhook: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-async def process_and_respond_multiple(update_data: dict, bot_service: TelegramBotService, db: Session):
+async def process_and_respond_multiple(
+    update_data: dict, 
+    bot_service: TelegramBotService, 
+    db: Session,
+    background_tasks: BackgroundTasks
+):
     """
     Procesa el update del usuario, obtiene una respuesta estructurada del servicio
     y se encarga de enviarla al chat correspondiente.
@@ -107,7 +113,7 @@ async def process_and_respond_multiple(update_data: dict, bot_service: TelegramB
         logger.info(f"Procesando update para chat {chat_id}...")
         
         # 1. Obtener la respuesta estructurada del servicio
-        response_data = await bot_service.process_message(db, update_data)
+        response_data = await bot_service.process_message(db, update_data, background_tasks)
         
         if not response_data:
             logger.info(f"El servicio determinó que no se necesita respuesta para el update del chat {chat_id}.")
@@ -224,7 +230,11 @@ async def test_webhook(
     
     try:
         # Procesar el mensaje directamente
-        response_data = await telegram_service.process_message(db, request_data.get("message", {}))
+        response_data = await telegram_service.process_message(
+            db=db, 
+            message_data=request_data, 
+            background_tasks=BackgroundTasks()
+        )
         
         return response_data
         

@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     telegram_webhook_url: Optional[str] = None
     telegram_webhook_secret: Optional[str] = None
 
+    # SMTP for emails - From .env
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: Optional[int] = None
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SENDER_EMAIL: Optional[str] = None
+
     class Config:
         env_file = ".env"
         case_sensitive = False

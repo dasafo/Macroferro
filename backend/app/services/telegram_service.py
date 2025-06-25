@@ -45,9 +45,11 @@ from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
 import re
 import os
+from fastapi import BackgroundTasks
 
 from app.core.config import settings
 from app.services.product_service import ProductService
+from app.services.email_service import send_invoice_email
 from app.crud.product_crud import get_product_by_sku, get_products
 from app.crud.client_crud import get_client_by_email, create_client
 from app.db.models.product_model import Product
@@ -423,7 +425,7 @@ class TelegramBotService:
     # PROCESAMIENTO INTELIGENTE DE MENSAJES
     # ========================================
     
-    async def process_message(self, db: Session, message_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def process_message(self, db: Session, message_data: Dict[str, Any], background_tasks: BackgroundTasks) -> Dict[str, Any]:
         """
         Procesa un mensaje entrante de Telegram, orquestando análisis de IA y respuestas.
         Esta es la función principal que maneja toda la lógica del bot.
@@ -451,7 +453,7 @@ class TelegramBotService:
             # Si es una acción del checkout, intentar procesarla
             if current_action and current_action.startswith("checkout"):
                 checkout_response = await self._process_checkout_data_collection(
-                    db, chat_id, message_text, current_action, action_data
+                    db, chat_id, message_text, current_action, action_data, background_tasks
                 )
                 
                 # Si el procesador del checkout devolvió una respuesta, la enviamos.
@@ -1649,7 +1651,7 @@ Responde en español de manera concisa pero completa.
 
         return False
 
-    async def _process_checkout_data_collection(self, db: Session, chat_id: int, message_text: str, current_action: str, action_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def _process_checkout_data_collection(self, db: Session, chat_id: int, message_text: str, current_action: str, action_data: Dict[str, Any], background_tasks: BackgroundTasks) -> Optional[Dict[str, Any]]:
         """
         Procesa la recolección de datos del cliente paso a paso.
         Devuelve None si el mensaje parece una interrupción y no una respuesta.
@@ -1720,7 +1722,7 @@ Responde en español de manera concisa pero completa.
         if current_action == "checkout_confirm_recurrent_data":
             if 'sí' in user_response or 'si' in user_response:
                 # Los datos son correctos, finalizar la compra
-                return await self._finalize_checkout_with_customer_data(db, chat_id, action_data)
+                return await self._finalize_checkout_with_customer_data(db, chat_id, action_data, background_tasks)
             else:
                 # Los datos no son correctos, iniciar recolección manual
                 set_pending_action(db, chat_id, "checkout_collect_name", {"email": action_data.get("email")})
@@ -1807,7 +1809,14 @@ Responde en español de manera concisa pero completa.
             action_data["address"] = address
             
             # Finalizar la compra con todos los datos recolectados
-            return await self._finalize_checkout_with_customer_data(db, chat_id, action_data)
+            # NOTA: La llamada final real se hace desde el endpoint con BackgroundTasks.
+            # Aquí solo preparamos para la finalización.
+            return await self._finalize_checkout_with_customer_data(
+                db=db, 
+                chat_id=chat_id, 
+                action_data=action_data, 
+                background_tasks=background_tasks
+            )
         
         return {
             "type": "text_messages",
@@ -2428,8 +2437,8 @@ Responde en español de manera concisa pero completa.
             "messages": [final_message]
         }
 
-    async def _finalize_checkout_with_customer_data(self, db: Session, chat_id: int, action_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Finaliza la compra con los datos del cliente recolectados."""
+    async def _finalize_checkout_with_customer_data(self, db: Session, chat_id: int, action_data: Dict[str, Any], background_tasks: BackgroundTasks) -> Dict[str, Any]:
+        """Finaliza la compra con los datos del cliente recolectados y envía correo en segundo plano."""
         try:
             async with self._get_api_client() as client:
                 # 1. Verificar si el carrito está vacío
@@ -2491,8 +2500,17 @@ Responde en español de manera concisa pero completa.
                 else:
                     logger.info(f"El cliente con email {action_data['email']} ya existe. No se crea un nuevo registro.")
 
-                # 6. Limpiar acción pendiente y confirmar al usuario
+                # 6. Limpiar acción pendiente y AÑADIR ENVÍO DE CORREO A TAREAS DE FONDO
                 clear_pending_action(db, chat_id)
+                
+                # Asegurarnos de que los datos completos del pedido están en order_data para el email
+                full_order_data_for_email = {**order_data, **action_data}
+
+                background_tasks.add_task(
+                    send_invoice_email,
+                    email_to=action_data["email"],
+                    order_data=full_order_data_for_email
+                )
                 
                 order_id = order_data.get("id")
                 total = order_data.get("total_amount", 0.0)
