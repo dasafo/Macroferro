@@ -9,6 +9,7 @@ import os
 import tempfile
 
 from app.core.config import settings
+from app.services.google_drive_service import google_drive_service
 
 logger = logging.getLogger(__name__)
 
@@ -152,14 +153,26 @@ async def send_invoice_email(
     temp_pdf_path = None
     try:
         # 1. Generar el PDF en memoria
+        pdf_filename = f"Factura-Macroferro-{order_data.get('id', 'pedido')}.pdf"
         pdf_content = create_invoice_pdf(order_data)
+
+        # 2. Subir a Google Drive ANTES de enviar el correo
+        drive_link = google_drive_service.upload_pdf(
+            pdf_content=pdf_content,
+            pdf_filename=pdf_filename,
+            folder_name="Macroferro_facturas"
+        )
+        if drive_link:
+            logger.info(f"Factura subida a Google Drive: {drive_link}")
+        else:
+            logger.error("No se pudo subir la factura a Google Drive.")
         
-        # 2. Guardar el PDF en un archivo temporal para poder adjuntarlo por su ruta
+        # 3. Guardar el PDF en un archivo temporal para poder adjuntarlo por su ruta
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
             temp_pdf.write(pdf_content)
             temp_pdf_path = temp_pdf.name
         
-        # 3. Preparar el mensaje
+        # 4. Preparar el mensaje
         subject = f"Confirmación de tu pedido en Macroferro - Factura #{order_data.get('id')}"
         
         email_body = f"""
@@ -178,13 +191,13 @@ async def send_invoice_email(
             subtype=MessageType.html,
             attachments=[{
                 "file": temp_pdf_path,  # Usamos la ruta del archivo temporal
-                "filename": f"Factura-Macroferro-{order_data.get('id', 'pedido')}.pdf",
+                "filename": pdf_filename,
                 "mime_type": "application",
                 "mime_subtype": "pdf"
             }]
         )
         
-        # 4. Enviar el correo
+        # 5. Enviar el correo
         await fm.send_message(message)
         logger.info(f"Correo de factura enviado exitosamente a {email_to}")
 
@@ -192,7 +205,7 @@ async def send_invoice_email(
         logger.error(f"Error al enviar correo de factura a {email_to}: {e}", exc_info=True)
         # Aquí se podría añadir lógica de reintentos si fuera necesario
     finally:
-        # 5. Limpiar: eliminar el archivo temporal después de usarlo
+        # 6. Limpiar: eliminar el archivo temporal después de usarlo
         if temp_pdf_path and os.path.exists(temp_pdf_path):
             os.remove(temp_pdf_path)
             logger.info(f"Archivo temporal de factura eliminado: {temp_pdf_path}") 

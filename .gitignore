@@ -94,6 +94,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.env*.local
+
 
 # Spyder project settings
 .spyderproject
@@ -112,3 +114,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Google credentials
+google-credentials.json
+
+# Docker
+docker-compose.override.yml 

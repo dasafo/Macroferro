@@ -2,6 +2,11 @@
 
 from pydantic_settings import BaseSettings
 from typing import Optional
+from pathlib import Path
+import os
+
+# Apunta al directorio 'backend/'
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 class Settings(BaseSettings):
     """
@@ -9,6 +14,7 @@ class Settings(BaseSettings):
     Variables sensibles desde .env, defaults seguros para el resto.
     """
     # Configuración general del proyecto
+    BASE_DIR: Path = BASE_DIR
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "Macroferro API"
     PROJECT_VERSION: str = "0.1.0"
