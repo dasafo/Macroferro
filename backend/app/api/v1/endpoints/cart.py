@@ -7,7 +7,7 @@ from app.core.config import Settings
 from app.schemas.product_schema import ProductResponse
 from app.schemas.order_schema import Order, OrderCreate
 from app.services.cart_service import CartService
-from app.crud import order_crud, product_crud
+from app.crud import order_crud, product_crud, stock_crud
 from app.schemas.cart_schema import CartItemCreate, Cart
 
 router = APIRouter()
@@ -23,11 +23,20 @@ async def add_item_to_cart(
     cart_service: CartService = Depends(get_cart_service)
 ):
     """
-    Añade un producto al carrito de un usuario.
+    Añade un producto al carrito de un usuario, verificando el stock disponible.
     """
     product_db = product_crud.get_product_by_sku(db, sku=item.product_sku)
     if not product_db:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    # --- NUEVA VERIFICACIÓN DE STOCK ---
+    total_stock = stock_crud.get_total_stock_by_sku(db, sku=item.product_sku)
+    if total_stock < item.quantity:
+        raise HTTPException(
+            status_code=409, # Conflict
+            detail=f"Stock insuficiente para {product_db.name}. Solicitado: {item.quantity}, Disponible: {total_stock}"
+        )
+    # --- FIN DE LA VERIFICACIÓN ---
 
     # Convertir el modelo de la BD (SQLAlchemy) a un esquema Pydantic
     product_schema = ProductResponse.model_validate(product_db)
@@ -83,23 +92,75 @@ async def remove_item_from_cart(
 @router.post("/{chat_id}/checkout", response_model=Order)
 async def checkout(
     chat_id: str,
-    order_in: OrderCreate,
     db: Session = Depends(deps.get_db),
     cart_service: CartService = Depends(get_cart_service)
 ):
     """
-    Procesa el pago, convierte el carrito en un pedido y lo vacía.
+    Procesa el checkout:
+    1. Verifica el stock de los productos en el carrito.
+    2. Si hay stock, crea la orden en la base de datos.
+    3. Deduce las cantidades del stock.
+    4. Vacía el carrito.
+    Todo esto se ejecuta en una única transacción.
     """
-    cart_contents = await cart_service.get_cart_contents(chat_id)
-    if not cart_contents:
+    cart_items = await cart_service.get_cart_contents(chat_id)
+    if not cart_items:
         raise HTTPException(status_code=400, detail="El carrito está vacío")
 
-    total_price = await cart_service.get_cart_total_price(chat_id)
-    
-    # Aquí se podría integrar una pasarela de pago
-    
-    order = order_crud.create_order(db=db, order=order_in, total_amount=total_price)
-    
+    # Aquí iría la información del cliente, que asumimos se obtiene de algún modo
+    # (ej: del perfil de Telegram o un paso anterior no implementado)
+    customer_data = {
+        "customer_name": "Cliente de Telegram",
+        "customer_email": "telegram.user@example.com",
+        "shipping_address": "Dirección a definir"
+    }
+
+    try:
+        # Iniciamos la transacción
+        db.begin()
+
+        # 1. VERIFICACIÓN DE STOCK
+        for sku, item_data in cart_items.items():
+            total_stock = stock_crud.get_total_stock_by_sku(db, sku)
+            if total_stock < item_data['quantity']:
+                raise HTTPException(
+                    status_code=409, # 409 Conflict es apropiado aquí
+                    detail=f"Stock insuficiente para {item_data['name']} (SKU: {sku}). Pedido: {item_data['quantity']}, Disponible: {total_stock}"
+                )
+        
+        # 2. CREACIÓN DE LA ORDEN
+        total_price = await cart_service.get_cart_total_price(chat_id)
+        
+        order_to_create = OrderCreate(
+            order_id=order_crud.get_next_order_id(db),
+            chat_id=chat_id,
+            customer_name=customer_data["customer_name"],
+            customer_email=customer_data["customer_email"],
+            shipping_address=customer_data["shipping_address"],
+            total_amount=total_price,
+            items=[CartItemCreate(product_sku=sku, quantity=item['quantity'], price=item['price']) for sku, item in cart_items.items()]
+        )
+        
+        order = order_crud.create_order(db=db, order=order_to_create)
+
+        # 3. DEDUCCIÓN DE STOCK
+        for sku, item_data in cart_items.items():
+            stock_crud.deduct_stock(db, sku, item_data['quantity'])
+
+        # Si todo ha ido bien, confirmamos la transacción
+        db.commit()
+        db.refresh(order)
+
+    except HTTPException as http_exc:
+        db.rollback() # Revertimos en caso de error de stock
+        raise http_exc # Re-lanzamos la excepción HTTP
+    except Exception as e:
+        db.rollback() # Revertimos en caso de cualquier otro error
+        raise HTTPException(status_code=500, detail=f"Ocurrió un error inesperado durante el checkout: {e}")
+
+    # 4. VACIAR EL CARRITO (solo después de que la transacción sea exitosa)
     await cart_service.clear_cart(chat_id)
+    
+    # Aquí se podría encolar el envío del email de confirmación
     
     return order 

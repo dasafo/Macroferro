@@ -1439,13 +1439,15 @@ Responde en español de manera concisa pero completa.
                     json={"product_sku": sku, "quantity": quantity}
                 )
                 
+                # Manejo de errores específico ANTES de raise_for_status
                 if response.status_code == 404:
-                    return {
-                        "type": "text_messages",
-                        "messages": [f"😕 No se encontró ningún producto con el SKU: {sku}"]
-                    }
+                    return {"type": "text_messages", "messages": [f"😕 No se encontró ningún producto con el SKU: {sku}"]}
                 
-                response.raise_for_status()
+                if response.status_code == 409: # Stock Insuficiente
+                    error_detail = response.json().get("detail", "No hay suficiente stock para este producto.")
+                    return {"type": "text_messages", "messages": [f"⚠️ ¡Atención! {error_detail}"]}
+
+                response.raise_for_status() # Lanza error para otros códigos 4xx/5xx
                 
                 # Registrar el producto agregado como visto recientemente
                 add_recent_product(db, chat_id, sku)
@@ -1458,18 +1460,14 @@ Responde en español de manera concisa pero completa.
                     cart_content
                 )
 
-        except httpx.HTTPError as e:
-            logger.error(f"Error de API al añadir al carrito para chat {chat_id}: {e}")
-            return {
-                "type": "text_messages",
-                "messages": ["Lo siento, ocurrió un error al intentar añadir el producto al carrito."]
-            }
+        except httpx.HTTPStatusError as e:
+            # Este bloque ahora captura errores inesperados (500, 401, etc.)
+            logger.error(f"Error de API no manejado al añadir al carrito para chat {chat_id}: {e}")
+            return {"type": "text_messages", "messages": ["Lo siento, ocurrió un error al intentar añadir el producto al carrito."]}
+        
         except Exception as e:
             logger.error(f"Error inesperado al añadir al carrito para chat {chat_id}: {e}")
-            return {
-                "type": "text_messages",
-                "messages": ["Ocurrió un error inesperado. Por favor, intenta de nuevo."]
-            }
+            return {"type": "text_messages", "messages": ["Ocurrió un error inesperado. Por favor, intenta de nuevo."]}
 
     async def _handle_view_cart(self, db: Session, chat_id: int) -> Dict[str, Any]:
         """Maneja el comando /ver_carrito."""
