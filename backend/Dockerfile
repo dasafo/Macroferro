@@ -7,7 +7,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Copiar el archivo de requerimientos primero para aprovechar el cache de Docker
-COPY ./requirements.txt /app/requirements.txt
+COPY backend/requirements.txt /app/requirements.txt
 
 # Instalar dependencias del sistema para WeasyPrint (PDF generation)
 RUN apt-get update && \
@@ -23,7 +23,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copiar el resto del código de la aplicación al directorio de trabajo
-COPY ./app /app/app
+COPY backend/app /app/app
+COPY init_db_scripts /app/init_db_scripts
+COPY backend/google-credentials.json /app/google-credentials.json
 
 # Exponer el puerto en el que correrá la aplicación (Uvicorn por defecto usa 8000)
 EXPOSE 8000

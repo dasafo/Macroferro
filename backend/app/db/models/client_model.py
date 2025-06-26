@@ -1,4 +1,5 @@
 from sqlalchemy import Column, String, Text
+from sqlalchemy.orm import relationship
 from app.db.database import Base
 
 class Client(Base):
@@ -8,4 +9,7 @@ class Client(Base):
     name = Column(String(255))
     email = Column(String(255), unique=True, index=True, nullable=False)
     phone = Column(String(50))
-    address = Column(Text) 
+    address = Column(Text)
+
+    # Relación con las órdenes
+    orders = relationship("Order", back_populates="client") 

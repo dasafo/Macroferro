@@ -101,48 +101,27 @@ CREATE TABLE IF NOT EXISTS stock (
 COMMENT ON TABLE stock IS 'Cantidad de cada producto en cada almacén.';
 COMMENT ON COLUMN stock.quantity IS 'Cantidad disponible del producto en el almacén. No puede ser negativa.';
 
--- Tabla de Facturas
-CREATE TABLE IF NOT EXISTS invoices (
-    invoice_id VARCHAR(50) PRIMARY KEY,
-    client_id VARCHAR(50),
-    total NUMERIC(10, 2) NOT NULL CHECK (total >= 0),
-    pdf_url TEXT,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_client_invoice FOREIGN KEY(client_id) REFERENCES clients(client_id) ON DELETE SET NULL
-);
-COMMENT ON TABLE invoices IS 'Facturas generadas para los pedidos de los clientes.';
-COMMENT ON COLUMN invoices.total IS 'Monto total de la factura. No puede ser negativo.';
-
--- Tabla de Items de Factura
-CREATE TABLE IF NOT EXISTS invoice_items (
-    item_id SERIAL PRIMARY KEY,
-    invoice_id VARCHAR(50) NOT NULL,
-    sku VARCHAR(50) NOT NULL,
-    quantity INT NOT NULL CHECK (quantity > 0),
-    price_at_purchase NUMERIC(10, 2) NOT NULL CHECK (price_at_purchase >= 0),
-    CONSTRAINT fk_invoice_item FOREIGN KEY(invoice_id) REFERENCES invoices(invoice_id) ON DELETE CASCADE,
-    CONSTRAINT fk_product_item FOREIGN KEY(sku) REFERENCES products(sku) ON DELETE RESTRICT
-);
-COMMENT ON TABLE invoice_items IS 'Detalle de los productos incluidos en cada factura.';
-COMMENT ON COLUMN invoice_items.quantity IS 'Cantidad del producto vendido. Debe ser mayor que cero.';
-COMMENT ON COLUMN invoice_items.price_at_purchase IS 'Precio unitario del producto al momento de la compra.';
-COMMENT ON CONSTRAINT fk_product_item ON invoice_items IS 'Restringe el borrado de un producto si está referenciado en alguna factura.';
-
--- Tabla de Órdenes (Carrito convertido a pedido)
+-- Tabla de Órdenes (la única fuente de verdad para las compras)
 CREATE TABLE IF NOT EXISTS orders (
-    id SERIAL PRIMARY KEY,
+    order_id VARCHAR(50) PRIMARY KEY,
+    client_id VARCHAR(50),
     chat_id VARCHAR(255) NOT NULL,
     customer_name VARCHAR(255) NOT NULL,
     customer_email VARCHAR(255) NOT NULL,
     shipping_address TEXT NOT NULL,
     total_amount NUMERIC(10, 2) NOT NULL CHECK (total_amount >= 0),
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    pdf_url TEXT,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_client_order FOREIGN KEY(client_id) REFERENCES clients(client_id) ON DELETE SET NULL
 );
-COMMENT ON TABLE orders IS 'Órdenes generadas desde el carrito de compras del bot de Telegram.';
+COMMENT ON TABLE orders IS 'Órdenes generadas desde el carrito de compras del bot de Telegram. Es la fuente de verdad de las transacciones.';
+COMMENT ON COLUMN orders.order_id IS 'ID de negocio único para el pedido (ej: ORD00001).';
+COMMENT ON COLUMN orders.client_id IS 'ID del cliente que realiza el pedido (si está registrado).';
 COMMENT ON COLUMN orders.chat_id IS 'ID del chat de Telegram del usuario que realizó la orden.';
 COMMENT ON COLUMN orders.status IS 'Estado de la orden: pending, confirmed, shipped, delivered, cancelled.';
+COMMENT ON COLUMN orders.pdf_url IS 'URL al PDF de la factura almacenado en un servicio externo como Google Drive.';
 
 -- Trigger para actualizar updated_at en orders
 CREATE TRIGGER update_orders_updated_at
@@ -152,12 +131,12 @@ EXECUTE FUNCTION update_updated_at_column();
 
 -- Tabla de Items de Orden
 CREATE TABLE IF NOT EXISTS order_items (
-    id SERIAL PRIMARY KEY,
-    order_id INT NOT NULL,
+    item_id SERIAL PRIMARY KEY,
+    order_id VARCHAR(50) NOT NULL,
     product_sku VARCHAR(50) NOT NULL,
     quantity INT NOT NULL CHECK (quantity > 0),
     price NUMERIC(10, 2) NOT NULL CHECK (price >= 0),
-    CONSTRAINT fk_order FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    CONSTRAINT fk_order FOREIGN KEY(order_id) REFERENCES orders(order_id) ON DELETE CASCADE,
     CONSTRAINT fk_product_order FOREIGN KEY(product_sku) REFERENCES products(sku) ON DELETE RESTRICT
 );
 COMMENT ON TABLE order_items IS 'Detalle de los productos incluidos en cada orden.';
@@ -206,12 +185,6 @@ DROP TABLE temp_images_load; -- Limpiar tabla temporal
 
 -- Stock depende de products y warehouses
 COPY stock(sku, warehouse_id, quantity) FROM '/docker-entrypoint-initdb.d/csv_data/stock.csv' WITH CSV HEADER DELIMITER ',';
-
--- Invoices depende de clients
-COPY invoices(invoice_id, client_id, total, pdf_url, created_at) FROM '/docker-entrypoint-initdb.d/csv_data/invoices.csv' WITH CSV HEADER DELIMITER ',';
-
--- Invoice_items depende de invoices y products
-COPY invoice_items(invoice_id, sku, quantity, price_at_purchase) FROM '/docker-entrypoint-initdb.d/csv_data/invoice_items.csv' WITH CSV HEADER DELIMITER ',';
 
 -- Finalizar la transacción
 COMMIT;

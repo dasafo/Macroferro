@@ -46,12 +46,15 @@ from sqlalchemy.orm import Session
 import re
 import os
 from fastapi import BackgroundTasks
+from datetime import datetime
 
 from app.core.config import settings
 from app.services.product_service import ProductService
 from app.services.email_service import send_invoice_email
 from app.crud.product_crud import get_product_by_sku, get_products
 from app.crud.client_crud import get_client_by_email, create_client
+from app.crud import order_crud # Importar el nuevo CRUD de pedidos
+from app.schemas import order_schema # Importar los nuevos esquemas de pedidos
 from app.db.models.product_model import Product
 from app.db.models.category_model import Category
 from app.crud.conversation_crud import (
@@ -815,6 +818,7 @@ Ejemplos de búsquedas vagas:
             "specifications": product.spec_json or {}
         }
         
+        price_str = f"{product_info['price']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         # Prompt para generar respuesta conversacional inteligente
         response_prompt = f"""
 Eres un asistente experto en productos industriales de Macroferro. Un cliente te preguntó:
@@ -827,7 +831,7 @@ PRODUCTO ENCONTRADO:
 - Nombre: {product_info['name']}
 - SKU: {product_info['sku']}
 - Descripción: {product_info['description']}
-- Precio: ${product_info['price']:,.2f}
+- Precio: {price_str} €
 - Marca: {product_info['brand']}
 - Categoría: {product_info['category']}
 - Stock: {product_info['stock_status']}
@@ -881,7 +885,7 @@ Responde en español de manera profesional y útil.
         else:
             # Fallback si el formato no es el esperado
             messages = self.split_response_into_messages(response_text, 800)
-            caption = messages[0] if messages else f"*{product.name}*\n💰 ${product.price:,.2f}"
+            caption = messages[0] if messages else f"*{product.name}*\n💰 {price_str}"
             additional_messages = messages[1:] if len(messages) > 1 else []
         
         # Añadir el prompt de cómo añadir al carrito
@@ -1024,11 +1028,12 @@ Responde en español de manera profesional y útil.
         
         # Mostrar productos
         for i, product in enumerate(unique_products, 1):
+            price_str = f"{product.price:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
             product_message = f"*{i}. {product.name}*\n"
             if product.description:
                 desc = product.description[:120] + "..." if len(product.description) > 120 else product.description
                 product_message += f"📝 {desc}\n"
-            product_message += f"💰 Precio: *${product.price:,.0f}*\n"
+            product_message += f"💰 Precio: *{price_str} €*\n"
             if product.category:
                 product_message += f"🏷️ {product.category.name}\n"
             if hasattr(product, 'brand') and product.brand:
@@ -1385,7 +1390,7 @@ Responde en español de manera concisa pero completa.
 
         if not items:
             return "🛒 Tu carrito está vacío."
-
+        
         response_text = "🛒 *Tu Carrito de Compras*\n\n"
         for sku, item_details in items.items():
             product_info = json.loads(item_details['product'])
@@ -1393,10 +1398,15 @@ Responde en español de manera concisa pero completa.
             quantity = item_details.get("quantity", 0)
             price = product_info.get("price", 0)
             subtotal = quantity * price
+            
+            price_str = f"{price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            subtotal_str = f"{subtotal:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
             response_text += f"▪️ *{product_name}* ({sku})\n"
-            response_text += f"    `{quantity} x ${price:,.2f} = ${subtotal:,.2f}`\n\n"
+            response_text += f"    `{quantity} x {price_str} € = {subtotal_str} €`\n\n"
         
-        response_text += f"\n*Total: ${total_price:,.2f}*"
+        total_str = f"{total_price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        response_text += f"\n*Total: {total_str} €*"
 
         return response_text
 
@@ -2438,121 +2448,119 @@ Responde en español de manera concisa pero completa.
         }
 
     async def _finalize_checkout_with_customer_data(self, db: Session, chat_id: int, action_data: Dict[str, Any], background_tasks: BackgroundTasks) -> Dict[str, Any]:
-        """Finaliza la compra con los datos del cliente recolectados y envía correo en segundo plano."""
+        """
+        Finaliza la compra creando un pedido en la BBDD, limpiando el carrito y enviando la confirmación.
+        """
         try:
+            # 1. Obtener el carrito de Redis
             async with self._get_api_client() as client:
-                # 1. Verificar si el carrito está vacío
                 get_response = await client.get(f"/cart/{chat_id}")
                 get_response.raise_for_status()
                 cart_data = get_response.json()
-                if not cart_data.get("items"):
-                    clear_pending_action(db, chat_id)
-                    return {
-                        "type": "text_messages",
-                        "messages": ["🛒 Tu carrito está vacío. No se puede finalizar la compra."]
-                    }
-
-                # 2. Validar que tenemos todos los datos necesarios
-                required_fields = ["name", "email", "phone", "address"]
-                for field in required_fields:
-                    if field not in action_data:
-                        clear_pending_action(db, chat_id)
-                        return {
-                            "type": "text_messages",
-                            "messages": ["❌ Faltan datos del cliente. Por favor, inicia el proceso de compra nuevamente."]
-                        }
-
-                # 3. Construir el payload del pedido
-                order_items = []
-                for sku, item_details in cart_data["items"].items():
-                    product_info = json.loads(item_details['product'])
-                    order_items.append({
-                        "product_sku": sku,
-                        "quantity": item_details["quantity"],
-                        "price": product_info["price"]
-                    })
-
-                order_payload = {
-                    "chat_id": str(chat_id),
-                    "customer_name": action_data["name"],
-                    "customer_email": action_data["email"],
-                    "customer_phone": action_data["phone"],
-                    "shipping_address": action_data["address"],
-                    "items": order_items
-                }
-
-                # 4. Llamar al endpoint de checkout
-                checkout_response = await client.post(f"/cart/{chat_id}/checkout", json=order_payload)
-                checkout_response.raise_for_status()
-                order_data = checkout_response.json()
-
-                # 5. Si es un cliente nuevo, guardarlo en la BBDD
-                if not get_client_by_email(db, action_data["email"]):
-                    logger.info(f"Cliente con email {action_data['email']} no encontrado. Intentando crear nuevo cliente...")
-                    create_client(
-                        db,
-                        name=action_data["name"],
-                        email=action_data["email"],
-                        phone=action_data["phone"],
-                        address=action_data["address"]
-                    )
-                    logger.info(f"Nuevo cliente con email {action_data['email']} guardado exitosamente.")
-                else:
-                    logger.info(f"El cliente con email {action_data['email']} ya existe. No se crea un nuevo registro.")
-
-                # 6. Limpiar acción pendiente y AÑADIR ENVÍO DE CORREO A TAREAS DE FONDO
+            
+            if not cart_data.get("items"):
                 clear_pending_action(db, chat_id)
-                
-                # Asegurarnos de que los datos completos del pedido están en order_data para el email
-                full_order_data_for_email = {**order_data, **action_data}
+                return {"type": "text_messages", "messages": ["🛒 Tu carrito está vacío. No se puede finalizar la compra."]}
 
-                background_tasks.add_task(
-                    send_invoice_email,
-                    email_to=action_data["email"],
-                    order_data=full_order_data_for_email
-                )
-                
-                order_id = order_data.get("id")
-                total = order_data.get("total_amount", 0.0)
-                
-                response_text = (
-                    f"🎉 *¡Gracias por tu compra!* 🎉\n\n"
-                    f"✅ *Pedido confirmado para:* {action_data['name']}\n\n"
-                    f"📄 *Detalles del Pedido:*\n"
-                    f"   • *ID:* `{order_id}`\n"
-                    f"   • *Total:* `${total:,.2f}`\n\n"
-                    f"📧 *Confirmación enviada a:* {action_data['email']}\n"
-                    f"📱 *Teléfono de contacto:* {action_data['phone']}\n"
-                    f"🏠 *Dirección de envío:* {action_data['address']}\n\n"
-                    f"📦 *Tu pedido será procesado y enviado pronto.*\n"
-                    f"¡Gracias por confiar en nosotros!"
-                )
-                
-                return {
-                    "type": "text_messages",
-                    "messages": [response_text]
-                }
+            # 2. Validar que tenemos todos los datos del cliente
+            required_fields = ["name", "email", "phone", "address"]
+            if not all(field in action_data for field in required_fields):
+                clear_pending_action(db, chat_id)
+                return {"type": "text_messages", "messages": ["❌ Faltan datos del cliente. Por favor, inicia el proceso de compra nuevamente."]}
 
-        except httpx.HTTPStatusError as e:
+            # 3. Obtener o crear el cliente en la BBDD
+            customer = get_client_by_email(db, action_data["email"])
+            if not customer:
+                customer = create_client(
+                    db,
+                    name=action_data["name"],
+                    email=action_data["email"],
+                    phone=action_data["phone"],
+                    address=action_data["address"]
+                )
+            
+            # 4. Preparar los datos para crear el pedido
+            new_order_id = order_crud.get_next_order_id(db)
+            
+            order_items_to_create = []
+            for sku, item_details in cart_data["items"].items():
+                product_info = json.loads(item_details['product'])
+                order_items_to_create.append(
+                    order_schema.OrderItemCreate(
+                        product_sku=sku,
+                        quantity=item_details["quantity"],
+                        price=product_info["price"]
+                    )
+                )
+
+            order_to_create = order_schema.OrderCreate(
+                order_id=new_order_id,
+                client_id=customer.client_id,
+                chat_id=str(chat_id),
+                customer_name=action_data["name"],
+                customer_email=action_data["email"],
+                shipping_address=action_data["address"],
+                total_amount=cart_data["total_price"],
+                items=order_items_to_create
+            )
+
+            # 5. Crear el pedido en la base de datos
+            created_order = order_crud.create_order(db, order=order_to_create)
+
+            # 6. Limpiar el carrito en Redis
+            async with self._get_api_client() as client:
+                await client.delete(f"/cart/{chat_id}")
+            
+            # 7. Limpiar acción pendiente y preparar datos para tareas de fondo
             clear_pending_action(db, chat_id)
-            if e.response.status_code == 400:
-                return {
-                    "type": "text_messages",
-                    "messages": ["🛒 Error en el carrito. Por favor, revisa tus productos y vuelve a intentar."]
-                }
-            else:
-                logger.error(f"Error de API en checkout final para chat {chat_id}: {e}")
-                return {
-                    "type": "text_messages",
-                    "messages": ["❌ Lo siento, ocurrió un error al procesar tu pedido. Intenta de nuevo."]
-                }
+            
+            # Preparar el diccionario con toda la información necesaria para el email y el CSV
+            full_order_data_for_services = {
+                "id": created_order.order_id,
+                "client_id": created_order.client_id,
+                "created_at": created_order.created_at,
+                "total_amount": created_order.total_amount,
+                "items": [
+                    {
+                        "product_sku": item.product_sku,
+                        "quantity": item.quantity,
+                        "price": float(item.price),
+                        "name": get_product_by_sku(db, item.product_sku).name or "Producto"
+                    } for item in created_order.items
+                ],
+                **action_data
+            }
+
+            background_tasks.add_task(
+                send_invoice_email,
+                email_to=action_data["email"],
+                order_data=full_order_data_for_services
+            )
+            
+            # 8. Enviar mensaje de confirmación al usuario
+            total_str = f"{created_order.total_amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            response_text = (
+                f"🎉 *¡Gracias por tu compra!* 🎉\n\n"
+                f"✅ *Pedido confirmado para:* {action_data['name']}\n\n"
+                f"📄 *Detalles del Pedido:*\n"
+                f"   • *ID:* `{created_order.order_id}`\n"
+                f"   • *Total:* `{total_str} €`\n\n"
+                f"📧 *Confirmación enviada a:* {action_data['email']}\n"
+                f"📱 *Teléfono de contacto:* {action_data['phone']}\n"
+                f"🏠 *Dirección de envío:* {action_data['address']}\n\n"
+                f"📦 *Tu pedido será procesado y enviado pronto.*\n"
+                f"¡Gracias por confiar en nosotros!"
+            )
+            
+            return { "type": "text_messages", "messages": [response_text] }
+
+        except httpx.HTTPError as e:
+            logger.error(f"Error de API en el carrito durante el checkout final para chat {chat_id}: {e}")
+            return {"type": "text_messages", "messages": ["❌ Lo siento, ocurrió un error al consultar tu carrito. Intenta de nuevo."]}
         except Exception as e:
             clear_pending_action(db, chat_id)
-            logger.error(f"Error inesperado en checkout final para chat {chat_id}: {e}")
-            return {
-                "type": "text_messages",
-                "messages": ["❌ Ocurrió un error inesperado. Por favor, intenta de nuevo."]
-            }
+            logger.error(f"Error inesperado en checkout final para chat {chat_id}: {e}", exc_info=True)
+            return {"type": "text_messages", "messages": ["❌ Ocurrió un error inesperado al procesar tu pedido. Por favor, intenta de nuevo."]}
 
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO

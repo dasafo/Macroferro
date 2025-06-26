@@ -4,7 +4,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import ENUM
+from sqlalchemy.dialects.postgresql import ENUM, TIMESTAMP
 
 from app.db.database import Base
 
@@ -18,45 +18,36 @@ order_status_enum = ENUM(
 class Order(Base):
     __tablename__ = "orders"
 
-    id = Column(Integer, primary_key=True, index=True)
-    chat_id = Column(String, nullable=False, index=True) # ID de chat de Telegram
-    
-    # Datos del cliente
-    customer_name = Column(String, nullable=False)
-    customer_email = Column(String, nullable=False, index=True)
-    shipping_address = Column(Text, nullable=True)
-
-    # Detalles del pedido
+    order_id = Column(String(50), primary_key=True, index=True)
+    client_id = Column(String(50), ForeignKey("clients.client_id"), nullable=True)
+    chat_id = Column(String(255), nullable=False)
+    customer_name = Column(String(255), nullable=False)
+    customer_email = Column(String(255), nullable=False)
+    shipping_address = Column(Text, nullable=False)
     total_amount = Column(Numeric(10, 2), nullable=False)
-    status = Column(String, nullable=False, default='pending')
-
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-    # Relación con OrderItem
+    status = Column(String(50), nullable=False, default='pending')
+    pdf_url = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
+    
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
+    client = relationship("Client", back_populates="orders")
 
     def __repr__(self):
-        return f"<Order(id={self.id}, chat_id='{self.chat_id}', status='{self.status}')>"
+        return f"<Order(id={self.order_id}, chat_id='{self.chat_id}', status='{self.status}')>"
 
 
 class OrderItem(Base):
     __tablename__ = "order_items"
 
-    id = Column(Integer, primary_key=True, index=True)
-    
-    # Claves foráneas
-    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False)
-    product_sku = Column(String, ForeignKey("products.sku"), nullable=False)
-
-    # Detalles del item
+    item_id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(String(50), ForeignKey("orders.order_id"), nullable=False)
+    product_sku = Column(String(50), ForeignKey("products.sku"), nullable=False)
     quantity = Column(Integer, nullable=False)
-    price = Column(Numeric(10, 2), nullable=False) # Precio al momento de la compra
+    price = Column(Numeric(10, 2), nullable=False)
 
-    # Relaciones
     order = relationship("Order", back_populates="items")
     product = relationship("Product")
 
     def __repr__(self):
-        return f"<OrderItem(id={self.id}, order_id={self.order_id}, product_sku='{self.product_sku}')>" 
+        return f"<OrderItem(id={self.item_id}, order_id={self.order_id}, product_sku='{self.product_sku}')>" 

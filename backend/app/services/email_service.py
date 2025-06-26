@@ -10,6 +10,9 @@ import tempfile
 
 from app.core.config import settings
 from app.services.google_drive_service import google_drive_service
+from app.services.csv_writer_service import csv_writer_service
+from app.crud import order_crud
+from app.api.deps import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -37,15 +40,21 @@ def _generate_invoice_html(order_data: Dict[str, Any]) -> str:
     items_html = ""
     for item in order_data.get("items", []):
         subtotal = item['price'] * item['quantity']
+        # Formato de moneda europea: 1.234,56 €
+        price_str = f"{item['price']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        subtotal_str = f"{subtotal:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        
         items_html += f"""
             <tr>
                 <td>{item['product_sku']}</td>
                 <td>{item.get('name', 'Producto')}</td>
                 <td class="quantity">{item['quantity']}</td>
-                <td class="price">${item['price']:,.2f}</td>
-                <td class="price">${subtotal:,.2f}</td>
+                <td class="price">{price_str} €</td>
+                <td class="price">{subtotal_str} €</td>
             </tr>
         """
+    
+    total_str = f"{order_data.get('total_amount', 0.0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
     html_content = f"""
     <!DOCTYPE html>
@@ -116,7 +125,7 @@ def _generate_invoice_html(order_data: Dict[str, Any]) -> str:
                 <tr class="total">
                     <td colspan="3"></td>
                     <td colspan="2" style="text-align:right;">
-                       <strong>Total: ${order_data.get('total_amount', 0.0):,.2f}</strong>
+                       <strong>Total: {total_str} €</strong>
                     </td>
                 </tr>
             </table>
@@ -153,7 +162,7 @@ async def send_invoice_email(
     temp_pdf_path = None
     try:
         # 1. Generar el PDF en memoria
-        pdf_filename = f"Factura-Macroferro-{order_data.get('id', 'pedido')}.pdf"
+        pdf_filename = f"{order_data.get('id', 'factura_sin_id')}.pdf"
         pdf_content = create_invoice_pdf(order_data)
 
         # 2. Subir a Google Drive ANTES de enviar el correo
@@ -164,8 +173,19 @@ async def send_invoice_email(
         )
         if drive_link:
             logger.info(f"Factura subida a Google Drive: {drive_link}")
+            
+            # Actualizar la URL del PDF en la base de datos
+            try:
+                db = next(get_db())
+                order_crud.update_order_pdf_url(db, order_id=order_data.get('id'), pdf_url=drive_link)
+                logger.info(f"URL del PDF para el pedido {order_data.get('id')} actualizada en la base de datos.")
+            except Exception as db_error:
+                logger.error(f"Error al actualizar la URL del PDF en la BBDD para el pedido {order_data.get('id')}: {db_error}")
+            
+            # Escribir en los archivos CSV en segundo plano
+            csv_writer_service(order_data=order_data, pdf_url=drive_link)
         else:
-            logger.error("No se pudo subir la factura a Google Drive.")
+            logger.error("No se pudo subir la factura a Google Drive. Tampoco se escribirá en CSV.")
         
         # 3. Guardar el PDF en un archivo temporal para poder adjuntarlo por su ruta
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:

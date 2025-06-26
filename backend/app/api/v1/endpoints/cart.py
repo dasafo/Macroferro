@@ -57,6 +57,17 @@ async def get_cart(
     total_price = await cart_service.get_cart_total_price(chat_id)
     return Cart(items=cart_contents, total_price=total_price)
 
+@router.delete("/{chat_id}", status_code=204)
+async def clear_cart(
+    chat_id: str,
+    cart_service: CartService = Depends(get_cart_service)
+):
+    """
+    Vacía completamente el carrito de un usuario.
+    """
+    await cart_service.clear_cart(chat_id)
+    return
+
 @router.delete("/{chat_id}/items/{product_sku}", status_code=204)
 async def remove_item_from_cart(
     chat_id: str,

@@ -48,13 +48,15 @@ services:
       - qdrant_storage:/qdrant/storage
 
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: macroferro_backend
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app
+      - ./backend/app:/app/app
       - ./scripts:/app/scripts # Montar el directorio de scripts
     depends_on:
       postgres:
