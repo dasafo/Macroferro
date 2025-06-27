@@ -396,6 +396,7 @@ Aunque el sistema es completamente funcional en su lógica de negocio principal,
 2.  **Sistema de Autenticación Robusto (JWT):** Implementar un sistema completo de roles y permisos (administrador, agente de ventas, cliente B2B) para controlar el acceso a la API y al futuro dashboard.
 3.  **Gestión de Inventario Multi-Almacén:** Refinar la lógica para gestionar transferencias de stock entre almacenes y optimizar la logística de los envíos.
 4.  **Módulo de Analítica y Reporting:** Crear un panel de Business Intelligence para analizar patrones de compra, predecir la demanda y generar informes de rendimiento.
+5.  **Panel de Administración en el Bot:** Habilitar un conjunto de comandos de administrador seguros (protegidos por contraseña o ID de usuario) directamente en Telegram. Esto permitiría al dueño del negocio consultar rápidamente estadísticas de ventas, ver información de clientes o revisar el inventario desde su móvil, de forma ágil y sin necesidad de acceder a un dashboard web.
 
 ### **Mejoras Técnicas y de Despliegue**
 1.  **Pipeline de CI/CD:** Configurar **GitHub Actions** o Jenkins para automatizar las pruebas y los despliegues a un entorno de producción.

@@ -30,10 +30,10 @@ from app.crud import order_crud
 from app.schemas import order_schema
 from app.api.deps import get_db
 from app.crud.conversation_crud import (
-    get_recent_products,
-    add_recent_product,
-    add_recent_intent,
-    set_pending_action,
+    get_recent_products, 
+    add_recent_product, 
+    add_recent_intent, 
+    set_pending_action, 
     clear_pending_action,
     get_pending_action,
     add_turn_to_history,
@@ -57,7 +57,7 @@ class TelegramBotService:
         """
         Inicializa el servicio, configurando el cliente de OpenAI y los handlers.
         """
-        self.openai_client = None
+            self.openai_client = None
         if settings.telegram_bot_token:
             self.api_base_url = f"https://api.telegram.org/bot{settings.telegram_bot_token}"
             logger.info("API de Telegram configurada.")
@@ -69,7 +69,7 @@ class TelegramBotService:
         else:
             self.api_base_url = None
             logger.warning("Telegram bot token no configurado.")
-
+        
         # Inicializar servicios y handlers
         self.product_service = ProductService()
         self.ai_analyzer = AIAnalyzer(self.openai_client)
@@ -81,7 +81,7 @@ class TelegramBotService:
     # ========================================
     # PROCESAMIENTO PRINCIPAL DE MENSAJES
     # ========================================
-
+    
     async def process_message(self, db: Session, message_data: Dict[str, Any], background_tasks: BackgroundTasks) -> Dict[str, Any]:
         """
         Procesa un mensaje entrante, orquestando análisis de IA y respuestas.
@@ -101,17 +101,17 @@ class TelegramBotService:
         
         try:
             # 1. Flujo de acciones pendientes (ej. checkout)
-            pending_action_info = get_pending_action(db, chat_id)
-            if pending_action_info:
-                current_action = pending_action_info.get("action")
-                action_data = pending_action_info.get("data", {})
-                if current_action and current_action.startswith("checkout"):
+        pending_action_info = get_pending_action(db, chat_id)
+        if pending_action_info:
+            current_action = pending_action_info.get("action")
+            action_data = pending_action_info.get("data", {})
+            if current_action and current_action.startswith("checkout"):
                     # No interrumpir el checkout por preguntas normales
                     if not self.checkout_handler.is_interrupting_message(message_text):
                         response_dict = await self.checkout_handler.process_step(
-                            db, chat_id, message_text, current_action, action_data, background_tasks
-                        )
-
+                    db, chat_id, message_text, current_action, action_data, background_tasks
+                )
+                
             if not response_dict:
                 # 2. Manejo de comandos y análisis de IA
                 if message_text.startswith('/'):
@@ -150,21 +150,21 @@ class TelegramBotService:
         
     async def _handle_command(self, db: Session, chat_id: int, message_text: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Maneja los comandos que empiezan con '/'."""
-        parts = message_text.split()
-        command = parts[0]
-        args = parts[1:]
-        
+            parts = message_text.split()
+            command = parts[0]
+            args = parts[1:]
+
         if command == '/start' or command == '/help':
             return self.get_help_message()
-        elif command == '/agregar':
+            elif command == '/agregar':
             return await self.cart_handler.add_item_by_command(db, chat_id, args)
-        elif command == '/ver_carrito':
+            elif command == '/ver_carrito':
             return await self.cart_handler.view_cart(db, chat_id)
-        elif command == '/eliminar':
+            elif command == '/eliminar':
             return await self.cart_handler.remove_item_by_command(db, chat_id, args)
-        elif command == '/vaciar_carrito':
+            elif command == '/vaciar_carrito':
             return await self.cart_handler.clear_cart(chat_id)
-        elif command == '/finalizar_compra':
+            elif command == '/finalizar_compra':
             return await self.checkout_handler.start_checkout(db, chat_id)
         else:
             return {"type": "text_messages", "messages": [f"😕 No reconozco el comando '{command}'. Escribe /help para ver la lista de comandos disponibles."]}
@@ -172,13 +172,13 @@ class TelegramBotService:
     async def _handle_natural_language(self, db: Session, chat_id: int, message_text: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Maneja mensajes en lenguaje natural usando IA."""
         logger.info(f"Analizando mensaje de chat {chat_id}: '{message_text}'")
-        
+
         history = get_conversation_history(db, chat_id, limit_turns=5)
         analysis = await self.ai_analyzer.analyze_user_intent(message_text, history=history)
-        
-        intent_type = analysis.get("intent_type", "general_conversation")
-        confidence = analysis.get("confidence", 0.5)
-        
+            
+            intent_type = analysis.get("intent_type", "general_conversation")
+            confidence = analysis.get("confidence", 0.5)
+            
         add_recent_intent(db, chat_id, intent_type, confidence)
         
         # Delegar a los handlers correspondientes
@@ -205,11 +205,11 @@ class TelegramBotService:
                     ]
                 }
             return await self._handle_conversational_response(db, message_text)
-            
-    # ========================================
-    # RESPUESTAS Y FORMATO
-    # ========================================
 
+            # ========================================
+    # RESPUESTAS Y FORMATO
+            # ========================================
+            
     async def _handle_conversational_response(self, db: Session, message_text: str) -> Dict[str, Any]:
         """Maneja respuestas conversacionales generales con personalidad de vendedor experto."""
         messages = []
@@ -225,13 +225,13 @@ class TelegramBotService:
         else:
             messages = ["Entendido. ¿Hay algo más en lo que pueda ayudarte?"]
         
-        return {"type": "text_messages", "messages": messages}
-        
+                return {"type": "text_messages", "messages": messages}
+            
     def get_help_message(self) -> Dict[str, Any]:
         """Devuelve el mensaje de ayuda con la lista de comandos."""
-        return {
-            "type": "text_messages",
-            "messages": [
+                return {
+                    "type": "text_messages",
+                    "messages": [
                 "🤖 *Comandos disponibles en Macroferro Bot:*\n\n"
                 "*Búsqueda de productos:*\n"
                 "• Escribe cualquier consulta en lenguaje natural\n"
@@ -251,7 +251,7 @@ class TelegramBotService:
     # ========================================
     # COMUNICACIÓN CON TELEGRAM API
     # ========================================
-
+    
     def _get_api_client(self) -> httpx.AsyncClient:
         """Crea un cliente HTTP para comunicarse con la propia API del backend."""
         base_url = f"http://localhost:{settings.PORT}{settings.API_V1_STR}"
@@ -304,7 +304,7 @@ class TelegramBotService:
                 sent_messages.append(sent_message)
                 if i < len(messages) - 1:
                     await asyncio.sleep(delay_between_messages)
-            except Exception as e:
+        except Exception as e:
                 logger.error(f"Error enviando mensaje múltiple (mensaje {i+1}) a chat {chat_id}: {e}")
         return sent_messages
 
@@ -326,7 +326,7 @@ class TelegramBotService:
                     responses.append(caption_response)
                 except Exception as e_text:
                     logger.error(f"Fallo al enviar caption como texto para producto {product.sku}: {e_text}")
-        else:
+                    else:
             try:
                 caption_response = await self.send_message(chat_id, caption, reply_markup=reply_markup)
                 responses.append(caption_response)
@@ -350,9 +350,9 @@ class TelegramBotService:
             result = response.json()
             if result.get("ok"):
                 logger.info(f"Webhook configurado exitosamente: {webhook_url}")
-            else:
+        else:
                 logger.error(f"Error configurando webhook: {result}")
-            return result
+        return result
 
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO
