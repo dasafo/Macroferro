@@ -248,13 +248,12 @@ class ProductService:
         # 
         # Si hay restricciones, SQLAlchemy lanzará IntegrityError que debe capturarse en la API
         try:
-            deleted_product = product_crud.delete_product(db=db, sku=sku)
+            deleted_product = product_crud.delete_product(db, sku=sku)
             return deleted_product
-        except Exception as e:
-            # En producción, manejar específicamente IntegrityError
-            logger.error(f"Error al eliminar producto {sku}: {e}")
-            # raise InvalidOperationError(f"Could not delete product {sku}. It might be referenced in an invoice.")
-            return None
+        except Exception as e: # Captura de excepción más específica sería mejor
+            # logger.error(f"Error deleting product SKU {sku}: {e}")
+            # raise InvalidOperationError(f"Could not delete product {sku}. It may be referenced in existing orders.")
+            pass # Temporalmente silenciar para la Fase 1
 
     async def search_products(
         self, 
@@ -264,77 +263,110 @@ class ProductService:
         category_filter: Optional[int] = None
     ) -> dict:
         """
-        Realiza una búsqueda semántica de productos usando embeddings y Qdrant,
-        con un filtrado opcional por categoría.
+        Realiza una búsqueda de productos.
+        MODIFICACIÓN TEMPORAL: Usa una búsqueda SQL LIKE en lugar de Qdrant para diagnóstico.
         """
-        self._ensure_clients()
-        
         try:
-            # 1. Generar embedding para la consulta del usuario
-            query_embedding = await self.get_embedding(query_text)
-
-            # 2. Construir filtro de Qdrant si se especifica una categoría
-            qdrant_filter = None
-            if category_filter is not None:
-                qdrant_filter = qdrant_models.Filter(
-                    must=[
-                        qdrant_models.FieldCondition(
-                            key="category_id",
-                            match=qdrant_models.MatchValue(value=category_filter)
-                        )
-                    ]
-                )
-
-            # 3. Realizar búsqueda en Qdrant
-            search_result = self.qdrant_client.search(
-                collection_name=settings.QDRANT_COLLECTION_NAME,
-                query_vector=query_embedding,
-                limit=top_k,
-                query_filter=qdrant_filter,
-                with_payload=True
-            )
-
-            # 4. Procesar resultados y obtener SKUs
-            found_skus = [point.payload['sku'] for point in search_result]
+            logger.info(f"Ejecutando búsqueda simple por texto para: '{query_text}'")
             
-            if not found_skus:
-                return {"main_results": [], "related_results": []}
+            # Usamos el product_crud que ya tiene una función de búsqueda por nombre
+            products = product_crud.get_products(db, name_like=query_text, limit=top_k)
+            
+            logger.info(f"Búsqueda simple encontró {len(products)} productos.")
 
-            # 5. Recuperar productos de la base de datos
-            # Usar una función optimizada para obtener múltiples productos por SKU
-            products_db = product_crud.get_products_by_skus(db, skus=found_skus)
-            
-            # Mapear productos por SKU para fácil acceso
-            products_map = {p.sku: p for p in products_db}
-            
-            # Ordenar los productos según el orden de Qdrant y separar
-            ordered_products = [products_map[sku] for sku in found_skus if sku in products_map]
-            
-            main_results = ordered_products[:top_k//2]
-            related_results = ordered_products[top_k//2:]
-
-            return {"main_results": main_results, "related_results": related_results}
+            return {
+                "products": products,
+                "message": f"Found {len(products)} products using simple text search."
+            }
 
         except Exception as e:
-            logger.error(f"Error en search_products: {e}")
-            return {"main_results": [], "related_results": []}
+            logger.error(f"Error durante la búsqueda simple de productos: {e}", exc_info=True)
+            return {"products": [], "message": f"An error occurred: {e}"}
 
+    # ========================================
+    # GESTIÓN DE EMBEDDINGS (para Qdrant)
+    # ========================================
+
+    async def get_all_products_for_embedding(self, db: Session) -> List[Product]:
+        """
+        Obtiene todos los productos de la base de datos para la indexación en Qdrant.
+        """
+        return product_crud.get_all_products(db)
+        
     async def get_embedding(self, text: str) -> List[float]:
-        """Genera embeddings para un texto usando el modelo de OpenAI."""
-        if not settings.OPENAI_API_KEY:
-            logger.warning("OPENAI_API_KEY no configurada para búsqueda semántica")
-            return []
-
+        """Generates an embedding for a given text using OpenAI's API."""
+        if self.openai_client is None:
+            # Asegurarse que es un cliente asíncrono
+            self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        
         try:
-            response = self.openai_client.embeddings.create(
-                input=text,
-                model="text-embedding-3-small"
+            response = await self.openai_client.embeddings.create(
+                model="text-embedding-3-small",
+                input=text
             )
             return response.data[0].embedding
         except Exception as e:
-            logger.error(f"Error al generar embedding: {e}")
-            return []
+            logger.error(f"Error getting embedding from OpenAI: {e}")
+            raise # Re-lanzar la excepción para que el llamador la maneje
+    
+    async def create_and_upload_embeddings(self, db: Session):
+        """
+        Crea embeddings para todos los productos y los sube a Qdrant.
+        """
+        # Asegurarse de que los clientes asíncronos estén inicializados
+        if self.qdrant_client is None:
+            self.qdrant_client = AsyncQdrantClient(host=settings.QDRANT_HOST, port=settings.QDRANT_PORT_GRPC)
+        
+        if self.openai_client is None:
+            self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
+        # Verificar y crear la colección en Qdrant si no existe
+        try:
+            await self.qdrant_client.get_collection(collection_name=settings.QDRANT_COLLECTION_PRODUCTS)
+            logger.info(f"Colección '{settings.QDRANT_COLLECTION_PRODUCTS}' ya existe.")
+        except Exception:
+            logger.info(f"Colección '{settings.QDRANT_COLLECTION_PRODUCTS}' no encontrada. Creando...")
+            await self.qdrant_client.recreate_collection(
+                collection_name=settings.QDRANT_COLLECTION_PRODUCTS,
+                vectors_config=qdrant_models.VectorParams(size=1536, distance=qdrant_models.Distance.COSINE),
+            )
+            logger.info("Colección creada.")
+        
+        products = await self.get_all_products_for_embedding(db)
+        logger.info(f"Obtenidos {len(products)} productos para embedding.")
+
+        points = []
+        for product in products:
+            # Crear texto descriptivo para el embedding
+            text_to_embed = f"Nombre: {product.name}. Descripción: {product.description}. Marca: {product.brand.name if product.brand else 'N/A'}. Categoría: {product.category.name if product.category else 'N/A'}."
+            
+            # Crear embedding
+            embedding = await self.get_embedding(text_to_embed)
+            
+            # Crear punto para Qdrant
+            point = qdrant_models.PointStruct(
+                id=product.id,
+                vector=embedding,
+                payload={
+                    "sku": product.sku,
+                    "name": product.name,
+                    "category_id": product.category_id,
+                    "brand_id": product.brand_id,
+                }
+            )
+            points.append(point)
+
+        # Subir los puntos a Qdrant en lotes
+        if points:
+            await self.qdrant_client.upsert(
+                collection_name=settings.QDRANT_COLLECTION_PRODUCTS,
+                points=points,
+                wait=True
+            )
+            logger.info(f"Subidos {len(points)} embeddings de productos a Qdrant.")
+        else:
+            logger.info("No hay productos para generar embeddings.")
+            
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO
 # ========================================

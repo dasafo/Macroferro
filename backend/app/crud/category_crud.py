@@ -168,6 +168,38 @@ def get_child_categories(db: Session, parent_id: int, skip: int = 0, limit: int 
     return db.query(Category).filter(Category.parent_id == parent_id).offset(skip).limit(limit).all()
 
 
+def get_category_and_all_children_ids(db: Session, category_id: int) -> List[int]:
+    """
+    Obtiene el ID de la categoría dada y los IDs de toda su descendencia.
+
+    Utiliza una consulta recursiva (CTE - Common Table Expression) para
+    recorrer eficientemente la jerarquía de categorías.
+
+    Args:
+        db: Sesión de SQLAlchemy
+        category_id: ID de la categoría raíz desde la que empezar a buscar.
+
+    Returns:
+        Una lista de IDs de categoría, incluyendo la original y todas sus hijas.
+    """
+    from sqlalchemy import text
+
+    # Consulta CTE recursiva para obtener la jerarquía de categorías
+    # Esta es una forma estándar y eficiente de manejar jerarquías en SQL.
+    cte = db.query(Category.category_id).filter(Category.category_id == category_id).cte(name='category_cte', recursive=True)
+    
+    # Parte recursiva de la CTE
+    cte = cte.union_all(
+        db.query(Category.category_id).join(cte, Category.parent_id == cte.c.category_id)
+    )
+    
+    # Seleccionar todos los IDs de la CTE
+    result = db.query(cte.c.category_id).all()
+    
+    # El resultado es una lista de tuplas, lo aplanamos a una lista de enteros
+    return [r[0] for r in result]
+
+
 # ========================================
 # OPERACIONES DE ESCRITURA (CREATE, UPDATE, DELETE)
 # ========================================

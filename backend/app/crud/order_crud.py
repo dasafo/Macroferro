@@ -41,8 +41,11 @@ def create_order(db: Session, order: OrderCreate) -> Order:
     """
     Crea un nuevo pedido en la base de datos.
     """
+    # Generar el nuevo ID de pedido secuencial
+    new_order_id = get_next_order_id(db)
+    
     db_order = Order(
-        order_id=order.order_id,
+        order_id=new_order_id,
         client_id=order.client_id,
         chat_id=order.chat_id,
         customer_name=order.customer_name,
@@ -55,7 +58,7 @@ def create_order(db: Session, order: OrderCreate) -> Order:
     
     for item_data in order.items:
         db_item = OrderItem(
-            order_id=order.order_id,
+            order_id=new_order_id,
             product_sku=item_data.product_sku,
             quantity=item_data.quantity,
             price=item_data.price

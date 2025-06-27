@@ -36,6 +36,28 @@ class Order(Base):
     def __repr__(self):
         return f"<Order(id={self.order_id}, chat_id='{self.chat_id}', status='{self.status}')>"
 
+    def to_dict(self):
+        """Convierte el objeto Order y sus items a un diccionario."""
+        return {
+            "id": self.order_id,
+            "client_id": self.client_id,
+            "chat_id": self.chat_id,
+            "customer_name": self.customer_name,
+            "customer_email": self.customer_email,
+            "shipping_address": self.shipping_address,
+            "total_amount": float(self.total_amount),
+            "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "items": [
+                {
+                    "product_sku": item.product_sku,
+                    "name": item.product.name,  # Incluimos el nombre del producto
+                    "quantity": item.quantity,
+                    "price": float(item.price)
+                } for item in self.items
+            ]
+        }
+
 
 class OrderItem(Base):
     __tablename__ = "order_items"

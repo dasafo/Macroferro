@@ -91,7 +91,6 @@ class OrderCreate(OrderBase):
     Incluye validaciones para asegurar que todos los datos
     necesarios estén presentes y sean válidos.
     """
-    order_id: str = Field(..., description="ID único de la orden")
     items: List[OrderItemCreate] = Field(..., description="Items de la orden", min_items=1)
     
     @validator('customer_name')

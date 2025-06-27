@@ -16,6 +16,31 @@ _conversation_contexts: Dict[int, Dict[str, Any]] = {}
 _recent_products: Dict[int, List[str]] = {}
 _user_intents: Dict[int, List[Dict[str, Any]]] = {}
 _pending_actions: Dict[int, Dict[str, Any]] = {}
+_conversation_histories: Dict[int, List[Dict[str, str]]] = {}
+
+def add_turn_to_history(db: Session, chat_id: int, user_message: str, bot_message: str):
+    """
+    Añade un turno de conversación (pregunta de usuario y respuesta del bot) al historial.
+    """
+    if chat_id not in _conversation_histories:
+        _conversation_histories[chat_id] = []
+    
+    _conversation_histories[chat_id].append({"role": "user", "content": user_message})
+    _conversation_histories[chat_id].append({"role": "assistant", "content": bot_message})
+    
+    # Mantener solo los últimos 10 turnos (20 mensajes) para no exceder el límite de tokens de la IA
+    _conversation_histories[chat_id] = _conversation_histories[chat_id][-20:]
+
+def get_conversation_history(db: Session, chat_id: int, limit_turns: int = 5) -> List[Dict[str, str]]:
+    """
+    Obtiene los últimos N turnos del historial de conversación.
+    """
+    if chat_id not in _conversation_histories:
+        return []
+        
+    # Multiplicamos por 2 porque cada turno son 2 mensajes (user y assistant)
+    limit_messages = limit_turns * 2
+    return _conversation_histories[chat_id][-limit_messages:]
 
 def add_recent_product(db: Session, chat_id: int, sku: str) -> None:
     """
@@ -139,6 +164,22 @@ def get_recent_intents(db: Session, chat_id: int, limit: int = 5) -> List[Dict[s
     
     return _user_intents[chat_id][:limit]
 
+def get_last_user_intent(db: Session, chat_id: int) -> Optional[str]:
+    """
+    Obtiene la intención más reciente del usuario.
+    
+    Args:
+        db: Sesión de base de datos
+        chat_id: ID del chat
+        
+    Returns:
+        La intención más reciente o None
+    """
+    intents = get_recent_intents(db, chat_id, limit=1)
+    if intents:
+        return intents[0].get('intent')
+    return None
+
 def set_pending_action(db: Session, chat_id: int, action: str, data: Dict[str, Any] = None) -> None:
     """
     Establece una acción pendiente para el usuario.
@@ -194,4 +235,6 @@ def clear_user_context(db: Session, chat_id: int) -> None:
     if chat_id in _user_intents:
         del _user_intents[chat_id]
     if chat_id in _pending_actions:
-        del _pending_actions[chat_id] 
+        del _pending_actions[chat_id]
+    if chat_id in _conversation_histories:
+        del _conversation_histories[chat_id] 

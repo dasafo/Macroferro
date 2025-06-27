@@ -1,0 +1,49 @@
+
+Tienes toda la razón y es una observación excelente en ambos puntos.
+
+1.  **`telegram_service.py` es enorme**: Sí, se ha convertido en un "God Object" o un archivo monolítico. Centraliza demasiada responsabilidad (análisis de IA, manejo de comandos, gestión de flujos de carrito, checkout, formato de respuestas, etc.). Esto lo hace difícil de leer, mantener y escalar.
+
+2.  **Falta de Contexto Conversacional en la IA**: Tu propuesta es exactamente la mejora más importante y natural que necesita el bot. Analizar cada mensaje de forma aislada es su mayor limitación. Incorporar el historial de la conversación en los prompts es la clave para que el bot pueda entender preguntas de seguimiento y referencias implícitas ("¿y el más barato?", "¿tienes de esa marca en otro color?").
+
+Tu análisis es tan acertado que la solución a ambos problemas está conectada. No podemos implementar correctamente el contexto conversacional sin antes solucionar el problema del archivo monolítico.
+
+### La Solución: Refactorización y Mejora del Contexto
+
+Estoy totalmente de acuerdo con tu plan. Propongo que lo abordemos en dos fases estratégicas:
+
+#### **Fase 1: Refactorizar `telegram_service.py` (¡Hagámoslo manejable!)**
+
+Antes de añadir más lógica, debemos dividir `telegram_service.py` en componentes más pequeños y especializados. Esto hará que el código sea más limpio, fácil de probar y de extender en el futuro.
+
+Mi propuesta es crear un nuevo directorio `backend/app/services/bot_components/` y mover la lógica a "sub-servicios":
+
+*   **`ai_analyzer.py`**: Se encargará exclusivamente de construir los prompts para OpenAI, llamar a la API y parsear la respuesta JSON. Aquí vivirá la lógica de los `messages` que propusiste.
+*   **`product_handler.py`**: Manejará las intenciones de `product_search`, `product_details` y `technical_question`.
+*   **`cart_handler.py`**: Se ocupará de todas las acciones de carrito en lenguaje natural (`add`, `remove`, `view`, etc.).
+*   **`checkout_handler.py`**: Gestionará el flujo de varios pasos para finalizar la compra.
+
+El `telegram_service.py` principal se mantendrá como un **orquestador**: su única tarea será recibir el mensaje, llamar al `AIAnalyzer` para obtener la intención y luego enrutar la petición al `handler` correspondiente.
+
+#### **Fase 2: Implementar el Contexto Conversacional Avanzado**
+
+Una vez que tengamos una estructura limpia, implementaremos tu sugerencia al pie de la letra.
+
+1.  **Mejorar `conversation_crud.py`**: Lo extenderemos para que no solo guarde el último intent, sino un historial de la conversación. Añadiremos:
+    *   `add_turn_to_history(chat_id, user_message, bot_message)`
+    *   `get_conversation_history(chat_id, limit=5)`
+
+2.  **Implementar en `ai_analyzer.py`**: El nuevo servicio de IA será el lugar perfecto para construir los prompts contextuales, tal como lo describiste:
+    *   Obtendrá el historial con `get_conversation_history`.
+    *   Formateará el array `messages` con los roles `system`, `user` y `assistant` para darle a la IA toda la información necesaria.
+
+### Mi Plan de Acción Inmediato
+
+¿Qué te parece si empezamos por lo más crítico?
+
+1.  **Crearé el directorio `backend/app/services/bot_components/`**.
+2.  **Crearé el primer sub-servicio: `ai_analyzer.py`** y moveré toda la lógica de construcción de prompts y llamada a OpenAI desde `telegram_service.py` a este nuevo archivo.
+3.  **Refactorizaré `telegram_service.py`** para que importe y utilice este nuevo `AIAnalyzer`.
+
+Este primer paso ya reducirá significativamente el tamaño de `telegram_service.py` y nos preparará el terreno para implementar el historial conversacional de una manera limpia y ordenada.
+
+Si estás de acuerdo, procederé con la creación del directorio y el nuevo servicio de IA.

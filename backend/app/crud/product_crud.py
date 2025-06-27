@@ -23,9 +23,11 @@ Estrategias de optimización implementadas:
 
 from sqlalchemy.orm import Session, joinedload, subqueryload,selectinload
 from typing import List, Optional, Dict, Any
+from sqlalchemy import or_
 
 from app.db.models.product_model import Product, ProductImage, Image
 from app.schemas import product_schema as product_schema # Schemas Pydantic para productos
+from . import category_crud
 
 # ========================================
 # OPERACIONES DE LECTURA (READ)
@@ -132,7 +134,13 @@ def get_products(
 
     # Aplicar filtros solo si se proporcionan (filtros opcionales y combinables)
     if category_id is not None:
-        query = query.filter(Product.category_id == category_id)
+        all_category_ids = category_crud.get_category_and_all_children_ids(db, category_id)
+        if all_category_ids:
+            query = query.filter(Product.category_id.in_(all_category_ids))
+        else:
+            # Si no se encuentran IDs (raro, pero posible), no devolver productos.
+            return []
+
     if brand:
         query = query.filter(Product.brand.ilike(f"%{brand}%"))  # Búsqueda insensible a mayúsculas/minúsculas
     if min_price is not None:
@@ -140,7 +148,12 @@ def get_products(
     if max_price is not None:
         query = query.filter(Product.price <= max_price)
     if name_like:
-        query = query.filter(Product.name.ilike(f"%{name_like}%"))
+        query = query.filter(
+            or_(
+                Product.name.ilike(f"%{name_like}%"),
+                Product.description.ilike(f"%{name_like}%")
+            )
+        )
         
     return query.offset(skip).limit(limit).all()
 

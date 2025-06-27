@@ -30,7 +30,7 @@ def append_to_invoices_csvs(order_data: Dict[str, Any], pdf_url: str) -> None:
     invoice_id = order_data.get('id')
     client_id = order_data.get('client_id')
     total_amount = order_data.get('total_amount')
-    created_at = order_data.get('created_at', datetime.now())
+    created_at_raw = order_data.get('created_at', datetime.now())
     items = order_data.get('items', [])
 
     if not all([invoice_id, client_id, total_amount, items]):
@@ -41,6 +41,12 @@ def append_to_invoices_csvs(order_data: Dict[str, Any], pdf_url: str) -> None:
     
     with csv_lock:
         try:
+            # Convertir la fecha si es un string en formato ISO
+            if isinstance(created_at_raw, str):
+                created_at = datetime.fromisoformat(created_at_raw)
+            else:
+                created_at = created_at_raw
+
             # 1. Escribir en invoices.csv
             invoice_row = [
                 invoice_id,
