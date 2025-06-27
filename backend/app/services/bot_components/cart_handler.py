@@ -122,7 +122,7 @@ class CartHandler:
                 add_recent_product(db, chat_id, sku)
                 
                 cart_data = response.json()
-                product_name = json.loads(cart_data['items'][sku]['product']).get('name', sku)
+                product_name = cart_data['items'][sku]['product'].get('name', sku)
                 
                 message = f"✅ *¡Añadido!* {quantity} x {product_name}" if quantity > 0 else f"➖ *¡Reducido!* Se quitaron {-quantity} x {product_name}"
 
@@ -225,7 +225,7 @@ class CartHandler:
 
         response_text = "🛒 *Tu Carrito de Compras*\n\n"
         for sku, item_details in items.items():
-            product_info = json.loads(item_details['product'])
+            product_info = item_details['product']
             price_str = f"{product_info.get('price', 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             subtotal_str = f"{item_details.get('quantity', 0) * product_info.get('price', 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             response_text += f"▪️ *{product_info.get('name', sku)}* ({sku})\n"

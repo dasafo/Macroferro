@@ -339,28 +339,27 @@ class ProductHandler:
                 logger.warning(f"No se pudo resolver la referencia numérica: '{reference}'")
                 return None
 
-        # Caso 2: Referencia textual (ej: "ese martillo", "el taladro hilti")
-        # Si el contexto es 'remove', buscamos solo en el carrito.
+        # Caso 2: Buscar en los productos que están actualmente en el carrito
         if action_context == 'remove':
             try:
                 async with httpx.AsyncClient(base_url=f"http://localhost:{settings.PORT}{settings.API_V1_STR}", timeout=10.0) as client:
                     response = await client.get(f"/cart/{chat_id}")
                     response.raise_for_status()
-                    cart_data = response.json().get("items", {})
+                    cart_data = response.json()
                     
-                    if not cart_data:
-                        return None 
-
-                    cart_products = []
-                    for sku, item in cart_data.items():
-                        prod_data = json.loads(item['product'])
-                        mock_product = type('obj', (object,), {'sku': sku, 'name': prod_data.get('name', ''), 'description': prod_data.get('description', '')})()
-                        cart_products.append(mock_product)
-
-                    return self._search_reference_in_product_list(reference, cart_products)
+                    cart_items = cart_data.get("items", {})
+                    # La clave es el SKU, el valor es un dict con 'quantity' y 'product'
+                    # El campo 'product' ahora es un diccionario, no un string JSON.
+                    products_in_cart = [item['product'] for item in cart_items.values()]
+                                        
+                    # Buscamos en los productos del carrito
+                    sku = self._search_reference_in_product_list(reference, products_in_cart)
+                    if sku:
+                        logger.info(f"Referencia '{reference}' resuelta a SKU '{sku}' desde el carrito.")
+                        return sku
             except Exception as e:
-                logger.error(f"Error al obtener carrito para resolver referencia 'remove': {e}")
-                return None
+                logger.error(f"Error al obtener carrito para resolver referencia '{action_context}': {e}")
+            return None
         
         # Para otros contextos ('add' o ninguno), buscamos en el historial de productos vistos.
         product_skus = get_recent_products(db, chat_id, limit=10)
@@ -387,14 +386,24 @@ class ProductHandler:
         reference_words = set(re.findall(r'\b\w+\b', reference.lower()))
         
         for product in product_list:
-            product_text = f"{product.name} {product.description}".lower()
+            # Esta función puede recibir objetos de producto (de la BD) o dicts (del carrito).
+            # Hay que manejar ambos casos.
+            is_dict = isinstance(product, dict)
+            name = product.get('name', '') if is_dict else getattr(product, 'name', '')
+            description = product.get('description', '') if is_dict else getattr(product, 'description', '')
+            sku = product.get('sku') if is_dict else getattr(product, 'sku', None)
+            
+            if not sku:
+                continue
+
+            product_text = f"{name} {description}".lower()
             product_words = set(re.findall(r'\b\w+\b', product_text))
             
             score = len(reference_words.intersection(product_words))
             
             if score > best_match_score:
                 best_match_score = score
-                best_match_sku = product.sku
+                best_match_sku = sku
 
         if best_match_sku:
             logger.info(f"Referencia '{reference}' resuelta a SKU {best_match_sku} con puntuación {best_match_score}.")

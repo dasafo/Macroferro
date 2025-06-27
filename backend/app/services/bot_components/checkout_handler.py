@@ -178,7 +178,7 @@ class CheckoutHandler:
             db.refresh(client)
         
         order_items = [
-            order_schema.OrderItemCreate(product_sku=sku, quantity=item["quantity"], price=json.loads(item["product"])["price"])
+            order_schema.OrderItemCreate(product_sku=sku, quantity=item["quantity"], price=item["product"]["price"])
             for sku, item in cart_data["items"].items()
         ]
         
