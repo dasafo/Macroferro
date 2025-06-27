@@ -5,6 +5,7 @@ from sqlalchemy.types import Integer
 
 from app.db.models.order_model import Order, OrderItem
 from app.schemas.order_schema import OrderCreate, OrderStatus, OrderItemCreate
+from app.crud import stock_crud
 
 def get_next_order_id(db: Session) -> str:
     """
@@ -65,6 +66,9 @@ def create_order(db: Session, order: OrderCreate) -> Order:
         )
         db.add(db_item)
         
+        # Deducir del stock
+        stock_crud.deduct_stock(db, sku=item_data.product_sku, quantity=item_data.quantity)
+
     db.commit()
     db.refresh(db_order)
     return db_order
