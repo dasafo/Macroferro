@@ -92,7 +92,7 @@ Responde ÚNICAMENTE con este JSON:
 }}
 
 Tipos de intent:
-- "product_details": Usuario pregunta por un producto específico que mencionó por nombre
+- "product_details": Usuario pregunta por un producto específico que mencionó por nombre o SKU.
 - "product_search": Usuario busca productos por categoría/tipo general 
 - "technical_question": Pregunta técnica sobre especificaciones
 - "cart_action": Usuario quiere gestionar su carrito (agregar, quitar, ver, vaciar, finalizar)
@@ -108,6 +108,9 @@ Ejemplos de cart_actions:
 - "Muéstrame mi carrito" → "cart_actions": [{ "action": "view" }]
 - "Vacía mi carrito" → "cart_actions": [{ "action": "clear" }]
 - "Quiero finalizar la compra" → "cart_actions": [{ "action": "checkout" }]
+- "pasemos por caja" → "cart_actions": [{ "action": "checkout" }]
+- "finalicemos la compra" → "cart_actions": [{ "action": "checkout" }]
+- "quiero pasar ya por caja" → "cart_actions": [{ "action": "checkout" }]
 - "Comprar" → "cart_actions": [{ "action": "checkout" }]
 - "quita 1 guante del carrito" -> "cart_actions": [{ "action": "remove", "quantity": 1, "product_reference": "guante" }]
 - "añade 5 guantes mas al carro" -> "cart_actions": [{ "action": "add", "quantity": 5, "product_reference": "guantes" }]
@@ -126,9 +129,15 @@ IMPORTANTE para product_reference:
 
 Ejemplos de otros tipos:
 - "¿Qué especificaciones tiene el Esmalte para Exteriores Bahco?" → product_details
+- "dame info del SKU00023" → intent_type: "product_details", specific_product_mentioned: "SKU00023"
+- "SKU00023 detalles" → intent_type: "product_details", specific_product_mentioned: "SKU00023"
 - "Busco tubos de PVC" → product_search  
 - "¿Cuál es el diámetro de ese tubo?" → technical_question
 - "Hola, ¿cómo están?" → general_conversation
+
+IMPORTANTE sobre SKUs para detalles:
+- Si el mensaje contiene un código SKU (ej: "SKU" seguido de 5 dígitos) y pide información ("info", "detalles", "dame"), el `intent_type` DEBE ser `product_details`.
+- En este caso, el campo `specific_product_mentioned` DEBE contener únicamente el código SKU extraído.
 
 IMPORTANTE sobre la repetición:
 - Si la pregunta actual del usuario es semánticamente idéntica o muy similar a su pregunta inmediatamente anterior en el historial, establece "is_repetition" a true. En caso contrario, a false.

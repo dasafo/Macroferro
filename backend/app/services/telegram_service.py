@@ -185,9 +185,14 @@ class TelegramBotService:
         if intent_type in ["product_details", "product_search", "technical_question", "catalog_inquiry"]:
             return await self.product_handler.handle_intent(db, intent_type, analysis, message_text, chat_id)
         elif intent_type == "cart_action":
-            # La acción 'checkout' es una acción de carrito que inicia un flujo más complejo
-            if analysis.get("cart_action") == "checkout":
+            # La acción 'checkout' es una acción de carrito que inicia un flujo más complejo.
+            # Comprobamos si alguna de las acciones solicitadas es 'checkout'.
+            cart_actions = analysis.get("cart_actions", [])
+            is_checkout = any(action.get("action") == "checkout" for action in cart_actions)
+
+            if is_checkout:
                 return await self.checkout_handler.start_checkout(db, chat_id)
+            
             return await self.cart_handler.handle_action(db, analysis, chat_id)
         else: # general_conversation
             is_simple_greeting = any(g in message_text.lower() for g in ['hola', 'gracias', 'buenos', 'buenas', 'ok', 'vale', 'adios'])

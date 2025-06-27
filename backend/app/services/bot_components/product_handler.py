@@ -78,7 +78,17 @@ class ProductHandler:
         # 2. Petición de detalles de producto (contextual)
         if intent_type == "product_details":
             logger.info("Manejando 'product_details'.")
-            sku = await self._resolve_product_reference(db, message_text, chat_id)
+            
+            # Prioridad 1: Usar el SKU si la IA lo extrajo directamente.
+            sku_reference = analysis.get("specific_product_mentioned")
+            if sku_reference and re.match(r'SKU\d{5}', sku_reference.strip(), re.IGNORECASE):
+                sku = sku_reference.strip().upper()
+                logger.info(f"SKU extraído directamente por la IA: {sku}")
+            else:
+                # Prioridad 2: Resolver referencia en lenguaje natural.
+                logger.info("No se encontró SKU directo, intentando resolver referencia contextual.")
+                sku = await self._resolve_product_reference(db, message_text, chat_id)
+
             if sku:
                 product = get_product_by_sku(db, sku)
                 if product:
