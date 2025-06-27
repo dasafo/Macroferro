@@ -87,7 +87,15 @@ backend/app/
 
 #### 2.4.7 `services/`
 
-* `product_service.py`: reúne CRUD + lógica extra (stock, imágenes) antes de exponerlos vía API.
+Aquí reside la **lógica de negocio principal**. Esta capa orquesta las operaciones CRUD y añade la lógica compleja que define lo que hace la aplicación. Tras la refactorización, la estructura es:
+
+*   `telegram_service.py`: Actúa como el **orquestador principal** del bot. Recibe las peticiones del webhook, las pasa al `AIAnalyzer` para entender la intención, y luego delega la tarea al `Handler` correspondiente.
+*   `bot_components/`: Un directorio que contiene **componentes especializados y modulares**, cada uno con una única responsabilidad:
+    *   `ai_analyzer.py`: Se comunica con la API de OpenAI para interpretar el lenguaje natural del usuario y extraer la `intención` y las `entidades`.
+    *   `product_handler.py`: Gestiona todo lo relacionado con la búsqueda de productos, ya sea por texto, semántica o SKU.
+    *   `cart_handler.py`: Encapsula toda la lógica para gestionar el carrito de la compra en Redis (añadir, ver, eliminar, vaciar).
+    *   `checkout_handler.py`: Orquesta el proceso de finalización de la compra, guiando al usuario para recoger sus datos y crear el pedido.
+*   `email_service.py`: (En desarrollo) Gestionará el envío de correos transaccionales, como las confirmaciones de pedido.
 
 ---
 

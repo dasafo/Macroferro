@@ -1,6 +1,20 @@
 # 🏭 Macroferro - Sistema Mayorista B2B
 
-**Plataforma completa de gestión mayorista para ferreterías con inteligencia artificial integrada.**
+<div align="center">
+  <img src="https://img.shields.io/badge/Python-3.9-3776AB?style=for-the-badge&logo=python" alt="Python 3.9">
+  <img src="https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi" alt="FastAPI">
+  <img src="https://img.shields.io/badge/PostgreSQL-Database-4169E1?style=for-the-badge&logo=postgresql" alt="PostgreSQL">
+  <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=for-the-badge&logo=docker" alt="Docker Compose">
+  <img src="https://img.shields.io/badge/Redis-Cache-DC382D?style=for-the-badge&logo=redis" alt="Redis">
+  <img src="https://img.shields.io/badge/Qdrant-Vector_DB-EF4A3A?style=for-the-badge&logo=qdrant&logoColor=white" alt="Qdrant">
+  <img src="https://img.shields.io/badge/OpenAI-IA-412991?style=for-the-badge&logo=openai" alt="OpenAI">
+  <img src="https://img.shields.io/badge/Telegram-Bot-26A5E4?style=for-the-badge&logo=telegram" alt="Telegram">
+</div>
+<br>
+
+**Macroferro** nace para revolucionar este modelo. A través de un bot de Telegram impulsado por IA, transformamos la interacción con el cliente en una experiencia conversacional, inteligente e instantánea. Permitimos a los clientes B2B consultar productos, gestionar sus carritos de compra y finalizar pedidos en lenguaje natural, 24/7, directamente desde su móvil, optimizando así el flujo de trabajo tanto para el cliente como para el mayorista.
+
+> **Nota:** Macroferro es un prototipo avanzado y completamente funcional, diseñado para demostrar la viabilidad y el poder de esta arquitectura. Aunque está listo para ser probado, funcionalidades como pasarelas de pago reales se han mantenido fuera del alcance actual para centrarse en la lógica de negocio principal, pero se detallan en la hoja de ruta de futuras mejoras.
 
 ---
 
@@ -24,6 +38,22 @@
 -   **Interacción:** Bot de Telegram con IA
 -   **Inteligencia Artificial:** OpenAI API
 -   **Tunnel HTTPS:** Cloudflare Tunnel (para webhooks de Telegram)
+
+## 📄 Documentación
+
+- **[Esquema de la Base de Datos](./docs/schema_db.md)**: Descripción detallada de todas las tablas, columnas y relaciones de la base de datos.
+- **[Estructura del Proyecto](./docs/Estructura.md)**: Un mapa completo de todas las carpetas y archivos del backend.
+- **[Hoja de Ruta del Proyecto](./docs/carrito.md)**: El estado actual del desarrollo, fases completadas y próximas funcionalidades.
+- **[Guía de Desarrollo y Túnel](./docs/guia_desarrollo_tunnel.md)**: Instrucciones para levantar el entorno de desarrollo, gestionar el túnel y depurar problemas.
+
+## 🧰 Scripts Clave
+
+La carpeta `scripts/` contiene utilidades esenciales para el mantenimiento y prueba del sistema.
+
+- **`index_qdrant_data.py`**: **Esencial.** Este script lee los productos de PostgreSQL, genera los *embeddings* con OpenAI y los indexa en la base de datos vectorial Qdrant. Es el corazón de la búsqueda semántica.
+- **`test_semantic_search.py`**: Script de prueba para validar la calidad y precisión de los resultados de la búsqueda semántica.
+- **`test_technical_questions.py`**: Batería de pruebas para verificar que el bot puede responder correctamente a preguntas técnicas sobre los productos.
+- **`auto_start_tunnel.sh`**: Utilidad para automatizar la creación del túnel HTTPS, facilitando el desarrollo local.
 
 ## 🎯 Características Principales
 
@@ -350,20 +380,27 @@ POST /api/v1/cart/{chat_id}/checkout
 
 ---
 
-## 🎯 **Próximos Pasos**
+## 🎯 Hoja de Ruta y Posibles Mejoras Futuras
 
-### **Fase 3: Gestión Avanzada de Pedidos (En Planificación)**
-1. **Seguimiento de órdenes** (estados y notificaciones)
-2. **Historial de pedidos** (consulta vía bot y API)
-3. **Gestión de inventario** (control de stock en tiempo real)
-4. **Notificaciones automáticas** (confirmaciones y actualizaciones)
+Aunque el sistema es completamente funcional en su lógica de negocio principal, se ha diseñado como una base sólida sobre la que se pueden construir muchas más capacidades. A continuación, se detallan algunas de las mejoras más interesantes a implementar:
 
-### **Fase 4: Gestión Empresarial**
-1. **Sistema de autenticación** (JWT, roles de usuario)
-2. **API de inventario** (gestión de stock y almacenes)
-3. **API de clientes** (gestión B2B completa)
-4. **API de facturación** (órdenes, pagos y reportes)
-5. **Dashboard administrativo** (interfaz web de gestión)
+### **Gestión Avanzada y Experiencia de Cliente**
+1.  **Pasarela de Pagos Real:** Integrar servicios como **Stripe** o **PayPal** para procesar transacciones de forma segura y automatizada, completando el ciclo de venta.
+2.  **Seguimiento de Órdenes en Tiempo Real:** Permitir a los clientes consultar el estado de su pedido (`confirmado`, `en preparación`, `enviado`, `entregado`) directamente desde el bot.
+3.  **Historial de Pedidos:** Dar acceso a los clientes a su historial de compras para que puedan repetir pedidos fácilmente o consultar facturas pasadas.
+4.  **Notificaciones Proactivas:** Usar el bot para enviar notificaciones sobre ofertas personalizadas, productos de interés que vuelven a tener stock, o actualizaciones sobre el estado de un envío.
+5.  **Soporte Multi-idioma y Multi-moneda:** Adaptar el sistema para operar en diferentes mercados internacionales.
+
+### **Capacidades Empresariales (B2B)**
+1.  **Dashboard Administrativo Interactivo:** Desarrollar una interfaz web (p. ej., con React o Vue.js) para que los administradores puedan gestionar productos, inventario, clientes y pedidos, además de visualizar analíticas de venta.
+2.  **Sistema de Autenticación Robusto (JWT):** Implementar un sistema completo de roles y permisos (administrador, agente de ventas, cliente B2B) para controlar el acceso a la API y al futuro dashboard.
+3.  **Gestión de Inventario Multi-Almacén:** Refinar la lógica para gestionar transferencias de stock entre almacenes y optimizar la logística de los envíos.
+4.  **Módulo de Analítica y Reporting:** Crear un panel de Business Intelligence para analizar patrones de compra, predecir la demanda y generar informes de rendimiento.
+
+### **Mejoras Técnicas y de Despliegue**
+1.  **Pipeline de CI/CD:** Configurar **GitHub Actions** o Jenkins para automatizar las pruebas y los despliegues a un entorno de producción.
+2.  **Suite de Testing Completa:** Ampliar las pruebas para incluir tests de integración y End-to-End (E2E) que validen los flujos completos de la aplicación.
+3.  **Logging y Monitorización Avanzados:** Integrar herramientas como **Prometheus** y **Grafana** para monitorizar la salud y el rendimiento del sistema en tiempo real.
 
 ---
 
