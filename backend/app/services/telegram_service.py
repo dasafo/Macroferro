@@ -23,6 +23,7 @@ from app.services.email_service import send_invoice_email
 from app.services.context_service import context_service
 from app.services.bot_components.ai_analyzer import AIAnalyzer
 from app.services.bot_components.product_handler import ProductHandler
+from app.services.bot_components.cart_handler import CartHandler
 from app.crud.client_crud import get_client_by_email, create_client
 from app.crud import order_crud
 from app.schemas import order_schema
@@ -72,6 +73,7 @@ class TelegramBotService:
         self.product_service = ProductService()
         self.ai_analyzer = AIAnalyzer(self.openai_client)
         self.product_handler = ProductHandler(self.product_service, self.openai_client)
+        self.cart_handler = CartHandler(self.product_handler)
         logger.info("Servicios y Handlers inicializados.")
 
     # ========================================
@@ -153,13 +155,13 @@ class TelegramBotService:
         if command == '/start' or command == '/help':
             return self.get_help_message()
         elif command == '/agregar':
-            return await self._handle_add_to_cart_command(db, chat_id, args)
+            return await self.cart_handler.add_item_by_command(db, chat_id, args)
         elif command == '/ver_carrito':
-            return await self._handle_view_cart(db, chat_id)
+            return await self.cart_handler.view_cart(db, chat_id)
         elif command == '/eliminar':
-            return await self._handle_remove_from_cart_command(chat_id, args)
+            return await self.cart_handler.remove_item_by_command(db, chat_id, args)
         elif command == '/vaciar_carrito':
-            return await self._handle_clear_cart(chat_id)
+            return await self.cart_handler.clear_cart(chat_id)
         elif command == '/finalizar_compra':
             return await self._handle_checkout(db, chat_id)
         else:
@@ -181,7 +183,10 @@ class TelegramBotService:
         if intent_type in ["product_details", "product_search", "technical_question", "catalog_inquiry"]:
             return await self.product_handler.handle_intent(db, intent_type, analysis, message_text, chat_id)
         elif intent_type == "cart_action":
-            return await self._handle_cart_action(db, analysis, chat_id)
+            # La acción 'checkout' es una acción de carrito que inicia un flujo más complejo
+            if analysis.get("cart_action") == "checkout":
+                return await self._handle_checkout(db, chat_id)
+            return await self.cart_handler.handle_action(db, analysis, chat_id)
         else: # general_conversation
             is_simple_greeting = any(g in message_text.lower() for g in ['hola', 'gracias', 'buenos', 'buenas', 'ok', 'vale', 'adios'])
             if intent_type == "general_conversation" and not is_simple_greeting and confidence > 0.6:
@@ -198,176 +203,18 @@ class TelegramBotService:
     # HANDLERS DE CARRITO Y CHECKOUT
     # ========================================
 
-    async def _handle_cart_action(self, db: Session, analysis: Dict, chat_id: int) -> Dict[str, Any]:
-        """Router para acciones de carrito detectadas por IA."""
-        action = analysis.get("cart_action")
-        
-        if action == "view":
-            return await self._handle_view_cart(db, chat_id)
-        elif action == "clear":
-            return await self._handle_clear_cart(chat_id)
-        elif action == "checkout":
-            return await self._handle_checkout(db, chat_id)
-        elif action == "add":
-            return await self._handle_natural_add_to_cart(db, analysis, chat_id)
-        elif action == "remove":
-            return await self._handle_natural_remove_from_cart(db, analysis, chat_id)
-        else:
-            return {"type": "text_messages", "messages": ["🤔 No estoy seguro de qué hacer con el carrito. Puedes probar con 'ver mi carrito', 'agregar [producto]' o 'finalizar compra'."]}
-
-    async def _handle_add_to_cart_command(self, db: Session, chat_id: int, args: List[str]) -> Dict[str, Any]:
-        """Maneja el comando /agregar <SKU> [cantidad]."""
-        if not args:
-            return {"type": "text_messages", "messages": ["Uso: /agregar <SKU> [cantidad]"]}
-        
-        sku = args[0]
-        try:
-            quantity = int(args[1]) if len(args) > 1 else 1
-            if quantity <= 0:
-                raise ValueError
-        except ValueError:
-            return {"type": "text_messages", "messages": ["La cantidad debe ser un número positivo."]}
-
-        return await self._add_item_to_cart(db, chat_id, sku, quantity)
-
-    async def _handle_natural_add_to_cart(self, db: Session, analysis: Dict, chat_id: int) -> Dict[str, Any]:
-        """Maneja añadir al carrito desde lenguaje natural."""
-        product_reference = analysis.get("cart_product_reference", "")
-        quantity = analysis.get("cart_quantity", 1)
-        
-        if not product_reference:
-            return {"type": "text_messages", "messages": ["🤔 No pude identificar qué producto quieres agregar. ¿Podrías ser más específico?"]}
-        
-        sku = await self.product_handler._resolve_product_reference(db, product_reference, chat_id, action_context='add')
-        
-        if not sku:
-            return {"type": "text_messages", "messages": [f"🤔 No pude identificar un producto para '{product_reference}'. ¿Podrías ser más específico o usar el SKU?"]}
-            
-        return await self._add_item_to_cart(db, chat_id, sku, quantity)
-
-    async def _add_item_to_cart(self, db: Session, chat_id: int, sku: str, quantity: int) -> Dict[str, Any]:
-        """Lógica central para añadir un item al carrito y devolver la confirmación."""
-        try:
-            async with self._get_api_client() as client:
-                response = await client.post(f"/cart/{chat_id}/items", json={"product_sku": sku, "quantity": quantity})
-                
-                if response.status_code == 404:
-                    return {"type": "text_messages", "messages": [f"😕 No se encontró ningún producto con el SKU: {sku}"]}
-                if response.status_code == 409:
-                    error_detail = response.json().get("detail", "No hay suficiente stock.")
-                    return {"type": "text_messages", "messages": [f"⚠️ ¡Atención! {error_detail}"]}
-
-                response.raise_for_status()
-                add_recent_product(db, chat_id, sku)
-                
-                cart_data = response.json()
-                product_name = json.loads(cart_data['items'][sku]['product']).get('name', sku)
-
-                return await self._create_cart_confirmation_response(
-                    db, chat_id,
-                    initial_message=f"✅ *¡Añadido!* {quantity} x {product_name}\n\n"
-                )
-        except httpx.HTTPError as e:
-            logger.error(f"Error de API al añadir al carrito para chat {chat_id}: {e}")
-            return {"type": "text_messages", "messages": ["Lo siento, ocurrió un error al intentar añadir el producto al carrito."]}
-        except Exception as e:
-            logger.error(f"Error inesperado al añadir al carrito para chat {chat_id}: {e}")
-            return {"type": "text_messages", "messages": ["Ocurrió un error inesperado. Por favor, intenta de nuevo."]}
-
-    async def _handle_view_cart(self, db: Session, chat_id: int) -> Dict[str, Any]:
-        """Maneja la visualización del carrito."""
-        try:
-            async with self._get_api_client() as client:
-                response = await client.get(f"/cart/{chat_id}")
-                response.raise_for_status()
-                cart_data = response.json()
-                
-                if not cart_data.get("items"):
-                    return {"type": "text_messages", "messages": ["🛒 Tu carrito está vacío."]}
-                
-                for sku in cart_data.get("items", {}).keys():
-                    add_recent_product(db, chat_id, sku)
-                
-                return await self._create_cart_confirmation_response(db, chat_id)
-
-        except httpx.HTTPError as e:
-            logger.error(f"Error de API al ver el carrito para chat {chat_id}: {e}")
-            return {"type": "text_messages", "messages": ["Lo siento, ocurrió un error al recuperar tu carrito."]}
-
-    async def _handle_remove_from_cart_command(self, chat_id: int, args: List[str]) -> Dict[str, Any]:
-        """Maneja el comando /eliminar <SKU>."""
-        if not args:
-            return {"type": "text_messages", "messages": ["Uso: /eliminar <SKU> [cantidad]. Si no especificas cantidad, se elimina el producto completo."]}
-        
-        sku = args[0]
-        try:
-            quantity = int(args[1]) if len(args) > 1 else None
-        except ValueError:
-            return {"type": "text_messages", "messages": ["La cantidad debe ser un número."]}
-
-        # Si se especifica cantidad, se reduce. Si no, se elimina.
-        if quantity:
-            return await self._add_item_to_cart(db, chat_id, sku, -quantity)
-        else:
-            return await self._remove_item_from_cart(chat_id, sku)
-
-    async def _handle_natural_remove_from_cart(self, db: Session, analysis: Dict, chat_id: int) -> Dict[str, Any]:
-        """Maneja quitar del carrito desde lenguaje natural."""
-        product_reference = analysis.get("cart_product_reference", "")
-        quantity_to_remove = analysis.get("cart_quantity")
-
-        if not product_reference:
-            return {"type": "text_messages", "messages": ["🤔 No pude identificar qué producto quieres quitar."]}
-            
-        sku = await self.product_handler._resolve_product_reference(db, product_reference, chat_id, action_context='remove')
-        if not sku:
-            return {"type": "text_messages", "messages": [f"🤔 No pude identificar '{product_reference}' en tu carrito."]}
-        
-        # Si la IA detectó una cantidad (ej: "quita uno..."), la usamos para reducir.
-        if quantity_to_remove:
-            return await self._add_item_to_cart(db, chat_id, sku, -int(quantity_to_remove))
-        
-        # Si no, se elimina el producto completo.
-        return await self._remove_item_from_cart(chat_id, sku)
-
-    async def _remove_item_from_cart(self, chat_id: int, sku: str) -> Dict[str, Any]:
-        """Lógica central para quitar un item del carrito."""
-        try:
-            async with self._get_api_client() as client:
-                response = await client.delete(f"/cart/{chat_id}/items/{sku}")
-                
-                if response.status_code == 404:
-                    return {"type": "text_messages", "messages": [f"El producto `{sku}` no estaba en tu carrito."]}
-                
-                response.raise_for_status()
-                
-                return {"type": "text_messages", "messages": [f"🗑️ Producto `{sku}` eliminado del carrito."]}
-
-        except httpx.HTTPError as e:
-            logger.error(f"Error de API al eliminar del carrito: {e}")
-            return {"type": "text_messages", "messages": [f"Lo siento, ocurrió un error al quitar el producto `{sku}`."]}
-
-    async def _handle_clear_cart(self, chat_id: int) -> Dict[str, Any]:
-        """Maneja el vaciado completo del carrito."""
-        try:
-            async with self._get_api_client() as client:
-                await client.delete(f"/cart/{chat_id}")
-                return {"type": "text_messages", "messages": ["✅ Tu carrito ha sido vaciado."]}
-        except httpx.HTTPError as e:
-            logger.error(f"Error de API al vaciar el carrito: {e}")
-            return {"type": "text_messages", "messages": ["Lo siento, ocurrió un error al vaciar tu carrito."]}
-
     async def _handle_checkout(self, db: Session, chat_id: int) -> Dict[str, Any]:
         """Inicia el flujo de checkout."""
         try:
-            async with self._get_api_client() as client:
+            # Reutilizamos el cliente de API del cart_handler para consistencia
+            async with self.cart_handler._get_api_client() as client:
                 get_response = await client.get(f"/cart/{chat_id}")
                 get_response.raise_for_status()
                 cart_data = get_response.json()
                 if not cart_data.get("items"):
                     return {"type": "text_messages", "messages": ["🛒 Tu carrito está vacío."]}
 
-                cart_summary = self._format_cart_data(cart_data)
+                cart_summary = self.cart_handler._format_cart_data(cart_data)
                 clear_pending_action(db, chat_id)
                 set_pending_action(db, chat_id, "checkout_ask_if_recurrent", {})
                 
@@ -453,7 +300,7 @@ class TelegramBotService:
     async def _finalize_checkout_with_customer_data(self, db: Session, chat_id: int, customer_data: Dict[str, Any], background_tasks: BackgroundTasks) -> Dict[str, Any]:
         """Finaliza la compra: crea pedido, limpia carrito, envía emails, y notifica al usuario."""
         try:
-            async with self._get_api_client() as client:
+            async with self.cart_handler._get_api_client() as client:
                 cart_response = await client.get(f"/cart/{chat_id}")
                 cart_response.raise_for_status()
                 cart_data = cart_response.json()
@@ -466,7 +313,7 @@ class TelegramBotService:
             client_obj, order_obj = await self._get_or_create_client_and_order(db, chat_id, cart_data, customer_data)
 
             # Limpiar carrito y acción pendiente
-            async with self._get_api_client() as client:
+            async with self.cart_handler._get_api_client() as client:
                 await client.delete(f"/cart/{chat_id}")
             clear_pending_action(db, chat_id)
             
@@ -537,7 +384,7 @@ class TelegramBotService:
     async def _create_cart_confirmation_response(self, db: Session, chat_id: int, initial_message: str = "") -> Dict[str, Any]:
         """Crea una respuesta estándar post-actualización de carrito, incluyendo sugerencias."""
         try:
-            async with self._get_api_client() as client:
+            async with self.cart_handler._get_api_client() as client:
                 response = await client.get(f"/cart/{chat_id}")
                 response.raise_for_status()
                 cart_content = self._format_cart_data(response.json())
