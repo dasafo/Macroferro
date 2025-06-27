@@ -102,26 +102,39 @@ class ProductHandler:
         # 4. Consulta de catálogo general
         if intent_type == "catalog_inquiry":
             logger.info("Manejando 'catalog_inquiry'.")
-            return self._handle_catalog_inquiry()
+            return self._handle_catalog_inquiry(db)
 
         # 5. Fallback para intenciones no manejadas
         logger.warning(f"Intención no manejada por ProductHandler: {intent_type}. Respondiendo genéricamente.")
-        return self._handle_catalog_inquiry()
+        return self._handle_catalog_inquiry(db)
 
 
-    def _handle_catalog_inquiry(self) -> Dict[str, Any]:
+    def get_main_categories_formatted(self, db: Session) -> str:
+        """
+        Obtiene las categorías principales de la base de datos y las formatea en un string.
+        """
+        main_categories = category_crud.get_root_categories(db)
+        if not main_categories:
+            return ""
+        
+        response_text = "Estas son nuestras categorías principales:\n"
+        response_text += "\n".join([f"• {cat.name}" for cat in main_categories])
+        return response_text
+    
+    def _handle_catalog_inquiry(self, db: Session) -> Dict[str, Any]:
         """
         Gestiona la consulta del catálogo de productos, mostrando las categorías principales.
         """
+        categories_text = self.get_main_categories_formatted(db)
+        
         return {
             "type": "text_messages",
             "messages": [
-                "¡Claro! En Macroferro somos especialistas en productos industriales.\nEstas son nuestras categorías principales:",
-                "• Adhesivos y selladores\n• Ferretería básica\n• Fontanería\n• Herramientas eléctricas\n• Herramientas manuales\n• Pinturas y acabados\n• Seguridad laboral\n• Tornillería",
+                f"¡Claro! En Macroferro somos especialistas en productos industriales.\n{categories_text}",
                 "💡 Puedes preguntarme por cualquiera de ellas (ej: 'qué tienes en tornillería') para ver más detalles."
             ]
         }
-        
+    
     async def _handle_category_search(self, db: Session, chat_id: int, category: Any, is_repetition: bool = False) -> Dict[str, Any]:
         """
         Realiza una búsqueda de productos filtrando por una categoría específica.

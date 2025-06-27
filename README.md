@@ -35,10 +35,11 @@
 -   **🚀 API REST Completa:** Documentación automática con FastAPI
 -   **🔐 Seguridad Robusta:** Autenticación y autorización integradas
 -   **🌐 Webhook HTTPS:** Integración segura con Telegram mediante Cloudflare
+-   **🧩 Arquitectura Modular y Escalable:** Lógica de negocio encapsulada en `Handlers` especializados, facilitando el mantenimiento y la extensión.
 -   **Webhooks de Telegram gestionados** de forma segura con `python-telegram-bot`
 -   **Validación de datos de entrada** con Pydantic para robustez
 
-## Estado Actual del Proyecto: **FASE 2 COMPLETADA** 🚀
+## Estado Actual del Proyecto: **FASE 3 COMPLETADA** 🚀
 
 ### ✅ **FASE 0: Cimientos del Entorno y Base de Datos** - **COMPLETADA**
 1.  **Entorno Contenerizado Funcional:** Todos los servicios base están operativos
@@ -50,43 +51,34 @@
 
 #### Arquitectura Backend Implementada
 
-**Estructura del Proyecto:**
+**Estructura del Proyecto (Post-Refactorización):**
 ```
 backend/
 ├── app/
 │   ├── main.py                 # Punto de entrada de FastAPI
 │   ├── api/
-│   │   ├── deps.py            # Dependencias de FastAPI
+│   │   ├── deps.py
 │   │   └── v1/
-│   │       ├── api_router.py  # Router principal v1
+│   │       ├── api_router.py
 │   │       └── endpoints/
-│   │           ├── products.py    # Endpoints de productos
-│   │           ├── categories.py  # Endpoints de categorías
-│   │           ├── cart.py        # Endpoints de carrito
-│   │           └── telegram.py    # Endpoints de Telegram
+│   │           ├── products.py, categories.py, cart.py, telegram.py
 │   ├── core/
-│   │   ├── config.py          # Configuración de la aplicación
-│   │   └── database.py        # Configuración de base de datos
+│   │   ├── config.py, database.py
 │   ├── crud/
-│   │   ├── product_crud.py    # Operaciones CRUD productos
-│   │   ├── category_crud.py   # Operaciones CRUD categorías
-│   │   ├── cart_crud.py       # Operaciones CRUD carrito
-│   │   └── order_crud.py      # Operaciones CRUD órdenes
+│   │   ├── product_crud.py, category_crud.py, cart_crud.py, ...
 │   ├── db/
-│   │   ├── base.py           # Base para modelos
-│   │   ├── database.py       # Configuración de SQLAlchemy
-│   │   └── models.py         # Modelos de SQLAlchemy
+│   │   ├── base.py, database.py, models/
 │   ├── schemas/
-│   │   ├── product.py        # Esquemas Pydantic productos
-│   │   ├── category.py       # Esquemas Pydantic categorías
-│   │   ├── cart.py           # Esquemas Pydantic carrito
-│   │   ├── order.py          # Esquemas Pydantic órdenes
-│   │   └── telegram.py       # Esquemas Pydantic Telegram
+│   │   ├── product.py, category.py, cart.py, order.py, ...
 │   └── services/
-│       ├── product_service.py    # Lógica de negocio productos
-│       ├── category_service.py   # Lógica de negocio categorías
-│       ├── cart_service.py       # Lógica de negocio carrito
-│       └── telegram_service.py   # Lógica de negocio Telegram
+│       ├── bot_components/
+│       │   ├── ai_analyzer.py      # Encapsula lógica de OpenAI
+│       │   ├── product_handler.py  # Lógica de búsqueda de productos
+│       │   ├── cart_handler.py     # Lógica de gestión del carrito
+│       │   └── checkout_handler.py # Lógica del flujo de compra
+│       ├── product_service.py
+│       ├── email_service.py
+│       └── telegram_service.py   # Orquestador principal del bot
 ├── Dockerfile
 └── requirements.txt
 ```
@@ -118,15 +110,10 @@ backend/
 - ✅ `POST /cart/{chat_id}/items` - Agregar producto al carrito
 - ✅ `DELETE /cart/{chat_id}/items/{product_sku}` - Eliminar producto del carrito
 - ✅ `DELETE /cart/{chat_id}` - Vaciar carrito completo
-- ✅ `POST /cart/{chat_id}/checkout` - Finalizar compra y crear orden
 
 **🤖 API de Telegram (`/api/v1/telegram/`):**
 - ✅ `POST /telegram/webhook` - Webhook para recibir mensajes de Telegram
-- ✅ **Procesamiento inteligente de mensajes** con OpenAI
-- ✅ **Búsqueda semántica** integrada en conversaciones
-- ✅ **Respuestas contextuales** con información de productos
-- ✅ **Manejo de imágenes** y detalles de productos
-- ✅ **Comandos de carrito** completamente integrados
+- ✅ **Orquestación de Lógica:** Delega tareas a Handlers especializados.
 
 ### ✅ **FASE 1.5: Indexación Semántica con IA** - **COMPLETADA**
 
@@ -172,108 +159,17 @@ Hemos añadido una capa de inteligencia en el proceso de compra para mejorar la 
 - ✅ **Modelo y CRUD de Clientes:**
   - Se ha implementado el modelo `Client` y las funciones CRUD para interactuar con la base de datos.
 
-### ✅ **FASE 1.5: Indexación Semántica con IA** - **COMPLETADA**
+### ✅ **FASE 3: Refactorización a Arquitectura de Componentes** - **COMPLETADA** 🧩
 
-Se ha desarrollado un sistema robusto para la indexación de productos en la base de datos vectorial Qdrant.
+Se ha completado una refactorización profunda para migrar de un `service layer` monolítico a una arquitectura basada en componentes especializados (`Handlers`), mejorando drásticamente la mantenibilidad, escalabilidad y claridad del código.
 
-**Funcionalidades Clave:**
-- ✅ **Script de Indexación (`scripts/index_qdrant_data.py`):**
-  - **Conexión multi-servicio:** PostgreSQL, Redis, Qdrant y OpenAI
-  - **Enriquecimiento con LLM:** Genera descripciones de marketing optimizadas usando `gpt-4o-mini-2024-07-18`
-  - **Caché Inteligente:** Utiliza Redis para cachear las descripciones generadas
-  - **Generación de Embeddings:** Convierte información en vectores semánticos con `text-embedding-3-small`
-  - **Indexación en Qdrant:** Almacena productos como puntos vectoriales en `macroferro_products`
-  - **Gestión de Estado:** Solo procesa productos nuevos o modificados
-- ✅ **Comando `Makefile` (`make update-catalog`):** Ejecuta todo el proceso de indexación
-- ✅ **Script de Prueba (`scripts/test_semantic_search.py`):** Valida la calidad de los resultados
-- ✅ **Colección Indexada:** **200 productos** completamente vectorizados y listos para búsqueda
-
-### ✅ **FASE 2: Bot de Telegram con IA y Carrito de Compras Integrado** - **COMPLETADA** 🎉
-
-#### Funcionalidades del Bot Implementadas
-
-**🤖 Interacción Inteligente:**
-- ✅ **Procesamiento de Lenguaje Natural:** Comprende consultas en español coloquial
-- ✅ **Búsqueda Semántica Avanzada:** Encuentra productos usando descripciones vagas o técnicas
-- ✅ **Respuestas Contextuales:** Proporciona información relevante y útil
-- ✅ **Manejo de Conversaciones:** Mantiene contexto durante la interacción
-
-**🔍 Búsqueda de Productos:**
-- ✅ **Umbral de Similitud:** Configurado en 0.6 para resultados precisos
-- ✅ **Resultados Principales:** Muestra hasta 3 productos más relevantes
-- ✅ **Productos Relacionados:** Sugiere alternativas cuando no hay coincidencias exactas
-- ✅ **Detalles Completos:** SKU, nombre, precio, especificaciones técnicas
-
-**🛒 Sistema de Carrito Completo:**
-- ✅ **Agregar Productos:** `/agregar <SKU> [cantidad]` - Añade productos al carrito
-- ✅ **Ver Carrito:** `/ver_carrito` - Muestra contenido y total del carrito
-- ✅ **Eliminar Productos:** `/eliminar <SKU>` - Remueve productos específicos
-- ✅ **Vaciar Carrito:** `/vaciar_carrito` - Limpia completamente el carrito
-- ✅ **Finalizar Compra:** `/finalizar_compra` - Procesa el checkout y crea orden
-- ✅ **Persistencia en Redis:** Los carritos se mantienen entre sesiones
-- ✅ **Cálculo Automático:** Precios y totales se actualizan en tiempo real
-
-**📱 Interfaz de Usuario:**
-- ✅ **Comandos Intuitivos:** `/start` con mensaje de bienvenida completo
-- ✅ **Ayuda Contextual:** `/help` lista todos los comandos disponibles
-- ✅ **Botones Interactivos:** "Ver más detalles" para cada producto
-- ✅ **Imágenes de Productos:** Muestra fotos cuando están disponibles
-- ✅ **Formato Profesional:** Información organizada y fácil de leer
-- ✅ **Manejo de Errores:** Respuestas amigables cuando no encuentra resultados
-
-#### Configuración del Webhook
-
-**🌐 Integración HTTPS Segura:**
-- ✅ **Cloudflare Tunnel:** Configurado en `bot.dasafodata.com`
-- ✅ **Webhook URL:** `https://bot.dasafodata.com/api/v1/telegram/webhook`
-- ✅ **Certificado SSL:** Automático vía Cloudflare
-- ✅ **Configuración Automática:** Se establece al iniciar la aplicación
-- ✅ **Autenticación por Token:** Verificación de seguridad en cada webhook
-
-#### Casos de Uso Funcionales
-
-**Ejemplos de Consultas que Funcionan:**
-```
-👤 Usuario: "Busco taladros"
-🤖 Bot: [Muestra 3 taladros con precios, especificaciones y botón "Ver más detalles"]
-
-👤 Usuario: "/agregar SKU00001 2"
-🤖 Bot: ✅ Agregado al carrito: 2x Producto [...] 
-        💰 Total del carrito: €XXX.XX
-
-👤 Usuario: "/ver_carrito"
-🤖 Bot: 🛒 Tu carrito:
-        • 2x Producto A - €XX.XX c/u
-        • 1x Producto B - €XX.XX c/u
-        💰 Total: €XXX.XX
-
-👤 Usuario: "/finalizar_compra"
-🤖 Bot: ✅ ¡Pedido procesado exitosamente!
-        📋 Número de orden: #ORD-XXXX
-        📧 Te enviaremos confirmación por email
-```
-
-#### Base de Datos de Órdenes
-
-**🗃️ Modelo de Datos Implementado:**
-- ✅ **Tabla `orders`:** Información principal de la orden
-  - ID único de orden
-  - Chat ID del cliente (Telegram)
-  - Nombre y email del cliente
-  - Dirección de envío
-  - Estado de la orden (pending, confirmed, shipped, delivered, cancelled)
-  - Monto total
-  - Timestamps de creación y actualización
-
-- ✅ **Tabla `order_items`:** Detalles de productos en cada orden
-  - Referencia a la orden
-  - SKU del producto
-  - Cantidad pedida
-  - Precio unitario al momento de la compra
-  - Subtotal calculado
-
-- ✅ **Integridad Referencial:** Claves foráneas y constraints configurados
-- ✅ **Enum de Estados:** Estados de orden tipados y validados
+**Mejoras Implementadas:**
+- ✅ **Creación del Directorio `bot_components/`:** Un nuevo espacio para alojar la lógica modular del bot.
+- ✅ **`AIAnalyzer`:** Componente dedicado exclusivamente a interactuar con la API de OpenAI, analizar la intención del usuario y extraer entidades.
+- ✅ **`ProductHandler`:** Gestiona todas las interacciones relacionadas con la búsqueda y visualización de productos.
+- ✅ **`CartHandler`:** Encapsula toda la lógica del carrito de compras, desde añadir productos hasta visualizarlos.
+- ✅ **`CheckoutHandler`:** Orquesta el flujo de varios pasos para finalizar la compra, incluyendo la recolección de datos del cliente.
+- ✅ **`TelegramBotService` como Orquestador:** El servicio principal ahora actúa como un director de orquesta, delegando tareas a los `handlers` correspondientes, resultando en un código más limpio y enfocado.
 
 ---
 
@@ -290,6 +186,7 @@ Se ha desarrollado un sistema robusto para la indexación de productos en la bas
 - [x] **Búsqueda semántica** (Qdrant + OpenAI embeddings)
 - [x] **Bot de Telegram** (interfaz conversacional completamente integrada)
 - [x] **Sistema de carrito** (agregar, modificar, eliminar, checkout)
+- [x] **Arquitectura modular** (Handlers especializados para IA, productos, carrito y checkout)
 - [x] **Procesamiento de órdenes** (creación automática desde carrito)
 - [x] **Webhook HTTPS** (Cloudflare Tunnel configurado)
 - [x] **Capa de servicios** (lógica de negocio)

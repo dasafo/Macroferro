@@ -44,23 +44,37 @@ class CartHandler:
         Punto de entrada principal para gestionar una acción de carrito detectada por la IA.
         Delega a métodos específicos según la acción.
         """
-        action = analysis.get("cart_action")
-        
-        # Nota: La acción 'checkout' se inicia desde aquí, pero su flujo de varios pasos
-        # se gestiona en telegram_service.py porque está muy ligado al estado de la conversación.
-        # En una futura refactorización, esto se movería a su propio CheckoutHandler.
-        
-        if action == "view":
-            return await self.view_cart(db, chat_id)
-        elif action == "clear":
-            return await self.clear_cart(chat_id)
-        elif action == "add":
-            return await self.natural_add_to_cart(db, analysis, chat_id)
-        elif action == "remove":
-            return await self.natural_remove_from_cart(db, analysis, chat_id)
-        else:
-            logger.warning(f"Acción de carrito desconocida o no manejable: {action}")
+        actions = analysis.get("cart_actions")
+        if not actions:
+            logger.warning("No se encontraron 'cart_actions' en el análisis de la IA.")
             return {"type": "text_messages", "messages": ["🤔 No estoy seguro de qué hacer con el carrito. Puedes probar con 'ver mi carrito', 'agregar [producto]' o 'finalizar compra'."]}
+
+        # Procesamos todas las acciones en secuencia
+        final_response = {}
+        processed_action = False
+        for action_details in actions:
+            action = action_details.get("action")
+            
+            # Nota: La acción 'checkout' se inicia desde aquí, pero su flujo de varios pasos
+            # se gestiona en CheckoutHandler.
+            # Por simplicidad, asumimos que checkout, view y clear vienen solas.
+            if action == "view":
+                return await self.view_cart(db, chat_id)
+            elif action == "clear":
+                return await self.clear_cart(chat_id)
+            elif action == "add":
+                final_response = await self.natural_add_to_cart(db, action_details, chat_id)
+                processed_action = True
+            elif action == "remove":
+                final_response = await self.natural_remove_from_cart(db, action_details, chat_id)
+                processed_action = True
+            else:
+                logger.warning(f"Acción de carrito desconocida o no manejable: {action}")
+                if not processed_action:
+                    return {"type": "text_messages", "messages": ["🤔 No estoy seguro de qué hacer con el carrito."]}
+        
+        # Devolvemos la respuesta de la última acción, que contiene el estado final del carrito
+        return final_response
 
     async def add_item_by_command(self, db: Session, chat_id: int, args: List[str]) -> Dict[str, Any]:
         """Maneja el comando /agregar <SKU> [cantidad]."""
@@ -77,10 +91,10 @@ class CartHandler:
 
         return await self._add_item_to_cart(db, chat_id, sku, quantity)
 
-    async def natural_add_to_cart(self, db: Session, analysis: Dict, chat_id: int) -> Dict[str, Any]:
+    async def natural_add_to_cart(self, db: Session, action_details: Dict, chat_id: int) -> Dict[str, Any]:
         """Maneja añadir al carrito desde lenguaje natural."""
-        product_reference = analysis.get("cart_product_reference", "")
-        quantity = analysis.get("cart_quantity", 1)
+        product_reference = action_details.get("product_reference", "")
+        quantity = action_details.get("quantity", 1)
         
         if not product_reference:
             return {"type": "text_messages", "messages": ["🤔 No pude identificar qué producto quieres agregar. ¿Podrías ser más específico?"]}
@@ -160,10 +174,10 @@ class CartHandler:
         else:
             return await self._remove_item_from_cart(chat_id, sku)
 
-    async def natural_remove_from_cart(self, db: Session, analysis: Dict, chat_id: int) -> Dict[str, Any]:
+    async def natural_remove_from_cart(self, db: Session, action_details: Dict, chat_id: int) -> Dict[str, Any]:
         """Maneja quitar del carrito desde lenguaje natural."""
-        product_reference = analysis.get("cart_product_reference", "")
-        quantity_to_remove = analysis.get("cart_quantity")
+        product_reference = action_details.get("product_reference", "")
+        quantity_to_remove = action_details.get("quantity")
 
         if not product_reference:
             return {"type": "text_messages", "messages": ["🤔 No pude identificar qué producto quieres quitar."]}

@@ -199,19 +199,23 @@ class TelegramBotService:
                         "Para poder ayudarte mejor, ¿podrías ser más específico? Por ejemplo, puedes decirme el tipo de producto que buscas (ej: 'tubos de acero') o la marca."
                     ]
                 }
-            return await self._handle_conversational_response(message_text)
+            return await self._handle_conversational_response(db, message_text)
             
     # ========================================
     # RESPUESTAS Y FORMATO
     # ========================================
 
-    async def _handle_conversational_response(self, message_text: str) -> Dict[str, Any]:
+    async def _handle_conversational_response(self, db: Session, message_text: str) -> Dict[str, Any]:
         """Maneja respuestas conversacionales generales con personalidad de vendedor experto."""
         messages = []
         if any(g in message_text.lower() for g in ['hola', 'buenos', 'buenas']):
+            
+            categories_text = self.product_handler.get_main_categories_formatted(db)
+            
             messages = [
                 "¡Hola! 👋 Soy el asistente técnico de Macroferro.",
-                "🔧 Estoy aquí para ayudarte con información sobre nuestros productos industriales. ¿En qué puedo ayudarte hoy?"
+                "🔧 Estoy aquí para ayudarte con información sobre nuestros productos industriales. ¿En qué puedo ayudarte hoy?",
+                f"\n{categories_text}\n\n💡 Puedes preguntarme por cualquiera de ellas (ej: 'qué tienes en tornillería') para ver más detalles."
             ]
         else:
             messages = ["Entendido. ¿Hay algo más en lo que pueda ayudarte?"]

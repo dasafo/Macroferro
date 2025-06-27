@@ -55,7 +55,7 @@ class AIAnalyzer:
             logger.warning("OpenAI no configurado, retornando intención por defecto.")
             return {"intent_type": "general_conversation", "confidence": 0.5}
 
-        system_prompt = f"""
+        system_prompt = """
 Eres un asistente de inteligencia artificial especializado en productos industriales de Macroferro.
 
 Analiza el último mensaje del usuario y determina exactamente qué tipo de respuesta necesita, considerando el contexto de la conversación anterior.
@@ -80,9 +80,13 @@ Responde ÚNICAMENTE con este JSON:
     "specific_product_mentioned": "nombre exacto del producto si se menciona" | null,
     "search_terms": ["término1", "término2"] | null,
     "technical_aspect": "aspecto técnico específico" | null,
-    "cart_action": "add" | "remove" | "view" | "clear" | "checkout" | null,
-    "cart_product_reference": "referencia al producto a agregar/quitar" | null,
-    "cart_quantity": número | null,
+    "cart_actions": [ 
+        {{ 
+            "action": "add" | "remove" | "view" | "clear" | "checkout",
+            "product_reference": "referencia al producto", 
+            "quantity": número 
+        }}
+    ] | null,
     "user_intent_description": "descripción clara de lo que quiere el usuario",
     "suggested_response_tone": "informative" | "conversational" | "technical"
 }}
@@ -95,36 +99,22 @@ Tipos de intent:
 - "catalog_inquiry": El usuario pregunta de forma general qué productos se venden (ej: "qué vendes", "qué tienes").
 - "general_conversation": Saludo, información general, otros temas
 
-Ejemplos de cart_action:
-- "Agrega ese martillo al carrito" → cart_action: "add", cart_product_reference: "ese martillo"
-- "Quiero agregar 5 tubos de PVC" → cart_action: "add", cart_quantity: 5, cart_product_reference: "tubos de PVC"
-- "Agrega el último producto que me mostraste" → cart_action: "add", cart_product_reference: "el último producto"
-- "Agrega esos tornillos UNC al carrito" → cart_action: "add", cart_product_reference: "esos tornillos UNC"
-- "Agrega 2 de esos tornillos métricos al carrito" → cart_action: "add", cart_quantity: 2, cart_product_reference: "esos tornillos métricos"
-- "Agrega el taladro Hilti al carrito" → cart_action: "add", cart_product_reference: "el taladro Hilti"
-- "dame 4 del número 5" → cart_action: "add", cart_quantity: 4, cart_product_reference: "número 5"
-- "ponme 3 del 2" → cart_action: "add", cart_quantity: 3, cart_product_reference: "el 2"
-- "agrega 2 del número 3" → cart_action: "add", cart_quantity: 2, cart_product_reference: "número 3"
-- "quiero 5 del 1" → cart_action: "add", cart_quantity: 5, cart_product_reference: "el 1"
-- "Quítalo del carrito" → cart_action: "remove", cart_product_reference: "eso"
-- "Quita el martillo del carrito" → cart_action: "remove", cart_product_reference: "el martillo"
-- "Quita los tornillos UNC del carrito" → cart_action: "remove", cart_product_reference: "los tornillos UNC"
-- "Muéstrame mi carrito" → cart_action: "view"
-- "Vacía mi carrito" → cart_action: "clear"
-- "Quiero finalizar la compra" → cart_action: "checkout"
-- "Comprar" → cart_action: "checkout"
-- "Quita 1 guante del carrito" -> cart_action: "remove", cart_quantity: 1, cart_product_reference: "guante"
-- "elimina dos de esos" -> cart_action: "remove", cart_quantity: 2, cart_product_reference: "esos"
-- "saca un adhesivo" -> cart_action: "remove", cart_quantity: 1, cart_product_reference: "un adhesivo"
-- "quita mejor 32 pinturas del carro" -> cart_action: "remove", cart_quantity: 32, cart_product_reference: "pinturas"
-- "si añade 3 adhesivos de montaje Facom al carro" -> cart_action: "add", cart_quantity: 3, cart_product_reference: "adhesivos de montaje Facom"
-- "6 de Adhesivo Profesional Hilti" -> cart_action: "add", cart_quantity: 6, cart_product_reference: "Adhesivo Profesional Hilti"
-- "añade 5 guantes mas al carro" -> cart_action: "add", cart_quantity: 5, cart_product_reference: "guantes", "is_update": true
-- "quita uno de martillo de bosch" -> cart_action: "remove", cart_quantity: 1, cart_product_reference: "martillo de bosch"
+Ejemplos de cart_actions:
+- "Agrega ese martillo al carrito" → "cart_actions": [{ "action": "add", "product_reference": "ese martillo", "quantity": 1 }]
+- "Quiero agregar 5 tubos de PVC" → "cart_actions": [{ "action": "add", "product_reference": "tubos de PVC", "quantity": 5 }]
+- "ponme 3 del 2 y 5 del SKU00024" → "cart_actions": [{ "action": "add", "product_reference": "el 2", "quantity": 3 }, { "action": "add", "product_reference": "SKU00024", "quantity": 5 }]
+- "Quítalo del carrito" → "cart_actions": [{ "action": "remove", "product_reference": "eso", "quantity": null }]
+- "Quita el martillo del carrito y 2 de esos tornillos" → "cart_actions": [{ "action": "remove", "product_reference": "el martillo", "quantity": null }, { "action": "remove", "product_reference": "esos tornillos", "quantity": 2 }]
+- "Muéstrame mi carrito" → "cart_actions": [{ "action": "view" }]
+- "Vacía mi carrito" → "cart_actions": [{ "action": "clear" }]
+- "Quiero finalizar la compra" → "cart_actions": [{ "action": "checkout" }]
+- "Comprar" → "cart_actions": [{ "action": "checkout" }]
+- "quita 1 guante del carrito" -> "cart_actions": [{ "action": "remove", "quantity": 1, "product_reference": "guante" }]
+- "añade 5 guantes mas al carro" -> "cart_actions": [{ "action": "add", "quantity": 5, "product_reference": "guantes" }]
 
-IMPORTANTE para cart_product_reference:
+IMPORTANTE para product_reference:
 - Mantén SIEMPRE la referencia en español exactamente como la dice el usuario
-- **NUNCA incluyas números en este campo.** Los números van en el campo "cart_quantity".
+- **NUNCA incluyas números en este campo.** Los números van en el campo "quantity".
 - Para referencias por orden número (ej: "del número 5", "del 2"), usa "número X" o "el X" según el usuario diga
 - Si dice "esos tornillos UNC", pon exactamente "esos tornillos UNC"
 - Si dice "el taladro Hilti", pon exactamente "el taladro Hilti"
