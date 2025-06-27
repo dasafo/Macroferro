@@ -24,6 +24,7 @@ from app.services.context_service import context_service
 from app.services.bot_components.ai_analyzer import AIAnalyzer
 from app.services.bot_components.product_handler import ProductHandler
 from app.services.bot_components.cart_handler import CartHandler
+from app.services.bot_components.checkout_handler import CheckoutHandler
 from app.crud.client_crud import get_client_by_email, create_client
 from app.crud import order_crud
 from app.schemas import order_schema
@@ -74,6 +75,7 @@ class TelegramBotService:
         self.ai_analyzer = AIAnalyzer(self.openai_client)
         self.product_handler = ProductHandler(self.product_service, self.openai_client)
         self.cart_handler = CartHandler(self.product_handler)
+        self.checkout_handler = CheckoutHandler(self.cart_handler)
         logger.info("Servicios y Handlers inicializados.")
 
     # ========================================
@@ -105,8 +107,8 @@ class TelegramBotService:
                 action_data = pending_action_info.get("data", {})
                 if current_action and current_action.startswith("checkout"):
                     # No interrumpir el checkout por preguntas normales
-                    if not self._is_interrupting_message(message_text):
-                        response_dict = await self._process_checkout_data_collection(
+                    if not self.checkout_handler.is_interrupting_message(message_text):
+                        response_dict = await self.checkout_handler.process_step(
                             db, chat_id, message_text, current_action, action_data, background_tasks
                         )
 
@@ -163,7 +165,7 @@ class TelegramBotService:
         elif command == '/vaciar_carrito':
             return await self.cart_handler.clear_cart(chat_id)
         elif command == '/finalizar_compra':
-            return await self._handle_checkout(db, chat_id)
+            return await self.checkout_handler.start_checkout(db, chat_id)
         else:
             return {"type": "text_messages", "messages": [f"😕 No reconozco el comando '{command}'. Escribe /help para ver la lista de comandos disponibles."]}
 
@@ -185,7 +187,7 @@ class TelegramBotService:
         elif intent_type == "cart_action":
             # La acción 'checkout' es una acción de carrito que inicia un flujo más complejo
             if analysis.get("cart_action") == "checkout":
-                return await self._handle_checkout(db, chat_id)
+                return await self.checkout_handler.start_checkout(db, chat_id)
             return await self.cart_handler.handle_action(db, analysis, chat_id)
         else: # general_conversation
             is_simple_greeting = any(g in message_text.lower() for g in ['hola', 'gracias', 'buenos', 'buenas', 'ok', 'vale', 'adios'])
@@ -200,202 +202,8 @@ class TelegramBotService:
             return await self._handle_conversational_response(message_text)
             
     # ========================================
-    # HANDLERS DE CARRITO Y CHECKOUT
-    # ========================================
-
-    async def _handle_checkout(self, db: Session, chat_id: int) -> Dict[str, Any]:
-        """Inicia el flujo de checkout."""
-        try:
-            # Reutilizamos el cliente de API del cart_handler para consistencia
-            async with self.cart_handler._get_api_client() as client:
-                get_response = await client.get(f"/cart/{chat_id}")
-                get_response.raise_for_status()
-                cart_data = get_response.json()
-                if not cart_data.get("items"):
-                    return {"type": "text_messages", "messages": ["🛒 Tu carrito está vacío."]}
-
-                cart_summary = self.cart_handler._format_cart_data(cart_data)
-                clear_pending_action(db, chat_id)
-                set_pending_action(db, chat_id, "checkout_ask_if_recurrent", {})
-                
-                return {
-                    "type": "text_messages",
-                    "messages": [
-                        f"✅ *Proceso de Compra Iniciado*\n\n{cart_summary}",
-                        "👋 Antes de continuar, ¿ya eres cliente nuestro? (responde *sí* o *no*)"
-                    ]
-                }
-        except httpx.HTTPError as e:
-            logger.error(f"Error de API en checkout para chat {chat_id}: {e}")
-            return {"type": "text_messages", "messages": ["❌ Lo siento, ocurrió un error al procesar tu pedido."]}
-
-    # ========================================
-    # FLUJO DE RECOLECCIÓN DE DATOS (CHECKOUT)
-    # ========================================
-
-    def _is_interrupting_message(self, text: str) -> bool:
-        """Heurística para detectar si un mensaje es una nueva pregunta que interrumpe un flujo."""
-        text_lower = text.strip().lower()
-        if text_lower.startswith('/') or '?' in text:
-            return True
-        question_words = ['qué', 'cual', 'cuál', 'cómo', 'donde', 'dónde', 'quien', 'quién', 'cuánto', 'cuando', 'por qué']
-        if text_lower.split() and text_lower.split()[0] in question_words:
-            return True
-        return False
-
-    async def _process_checkout_data_collection(self, db: Session, chat_id: int, message_text: str, current_action: str, action_data: Dict[str, Any], background_tasks: BackgroundTasks) -> Optional[Dict[str, Any]]:
-        """Procesa la recolección de datos del cliente paso a paso."""
-        user_response = message_text.strip().lower()
-
-        if current_action == "checkout_ask_if_recurrent":
-            if 'sí' in user_response or 'si' in user_response:
-                set_pending_action(db, chat_id, "checkout_get_recurrent_email", {})
-                return {"type": "text_messages", "messages": ["¡Genial! Por favor, envíame tu *correo electrónico* para buscar tus datos."]}
-            elif 'no' in user_response:
-                set_pending_action(db, chat_id, "checkout_collect_name", {})
-                return {"type": "text_messages", "messages": ["Entendido. Comencemos con el registro.\n\n👤 Por favor, envíame tu *nombre completo*:"]}
-            else:
-                return {"type": "text_messages", "messages": ["🤔 No entendí tu respuesta. Por favor, responde solo *sí* o *no*."]}
-
-        elif current_action == "checkout_get_recurrent_email":
-            email = user_response
-            client = get_client_by_email(db, email)
-            if client:
-                action_data = {"name": client.name, "email": client.email, "phone": client.phone, "address": client.address}
-                set_pending_action(db, chat_id, "checkout_confirm_recurrent_data", action_data)
-                return {"type": "text_messages", "messages": [f"¡Hola de nuevo, *{client.name}*! 👋\n\nHe encontrado estos datos:\n📞 Teléfono: *{client.phone}*\n🏠 Dirección: *{client.address}*\n\n¿Son correctos para el envío? (*sí* o *no*)"]}
-            else:
-                set_pending_action(db, chat_id, "checkout_collect_name", {"email": email})
-                return {"type": "text_messages", "messages": ["No encontré tus datos. Vamos a registrarlos.\n\n👤 Para empezar, ¿cuál es tu *nombre completo*?"]}
-
-        elif current_action == "checkout_confirm_recurrent_data":
-            if 'sí' in user_response or 'si' in user_response:
-                return await self._finalize_checkout_with_customer_data(db, chat_id, action_data, background_tasks)
-            else:
-                set_pending_action(db, chat_id, "checkout_collect_name", {"email": action_data.get("email")})
-                return {"type": "text_messages", "messages": ["Entendido, actualicemos tus datos.\n\n👤 Por favor, envíame tu *nombre completo*:"]}
-        
-        # Flujo de recolección para nuevos clientes
-        elif current_action == "checkout_collect_name":
-            action_data["name"] = message_text.strip()
-            set_pending_action(db, chat_id, "checkout_collect_email", action_data)
-            return {"type": "text_messages", "messages": [f"✅ Perfecto, *{action_data['name']}*.\n\n📧 Ahora envíame tu *correo electrónico*:"]}
-
-        elif current_action == "checkout_collect_email":
-            action_data["email"] = user_response
-            set_pending_action(db, chat_id, "checkout_collect_phone", action_data)
-            return {"type": "text_messages", "messages": [f"✅ Email guardado.\n\n📱 Ahora envíame tu *número de teléfono*:"]}
-        
-        elif current_action == "checkout_collect_phone":
-            action_data["phone"] = message_text.strip()
-            set_pending_action(db, chat_id, "checkout_collect_address", action_data)
-            return {"type": "text_messages", "messages": [f"✅ Teléfono guardado.\n\n🏠 Por último, envíame tu *dirección de envío completa*:"]}
-
-        elif current_action == "checkout_collect_address":
-            action_data["address"] = message_text.strip()
-            return await self._finalize_checkout_with_customer_data(db, chat_id, action_data, background_tasks)
-
-        return {"type": "text_messages", "messages": ["❌ Error en el proceso de recolección de datos."]}
-
-    async def _finalize_checkout_with_customer_data(self, db: Session, chat_id: int, customer_data: Dict[str, Any], background_tasks: BackgroundTasks) -> Dict[str, Any]:
-        """Finaliza la compra: crea pedido, limpia carrito, envía emails, y notifica al usuario."""
-        try:
-            async with self.cart_handler._get_api_client() as client:
-                cart_response = await client.get(f"/cart/{chat_id}")
-                cart_response.raise_for_status()
-                cart_data = cart_response.json()
-
-            if not cart_data.get("items"):
-                clear_pending_action(db, chat_id)
-                return {"type": "text_messages", "messages": ["🛒 Tu carrito está vacío. No se puede finalizar la compra."]}
-
-            # Crear o actualizar cliente y crear el pedido
-            client_obj, order_obj = await self._get_or_create_client_and_order(db, chat_id, cart_data, customer_data)
-
-            # Limpiar carrito y acción pendiente
-            async with self.cart_handler._get_api_client() as client:
-                await client.delete(f"/cart/{chat_id}")
-            clear_pending_action(db, chat_id)
-            
-            # Enviar email de confirmación en segundo plano
-            background_tasks.add_task(send_invoice_email, email_to=client_obj.email, order_data=order_obj.to_dict())
-
-            return {"type": "text_messages", "messages": [f"🎉 *¡Gracias por tu compra, {client_obj.name}!* \n\n✅ Tu pedido `#{order_obj.order_id}` ha sido confirmado.\nTe hemos enviado un email a *{client_obj.email}* con los detalles."]}
-
-        except httpx.HTTPError as e:
-            logger.error(f"Error de API en checkout final para chat {chat_id}: {e}")
-            return {"type": "text_messages", "messages": ["❌ Lo siento, ocurrió un error con tu carrito."]}
-        except Exception as e:
-            logger.error(f"Error inesperado en checkout final para chat {chat_id}: {e}", exc_info=True)
-            return {"type": "text_messages", "messages": ["❌ Ocurrió un error inesperado al procesar tu pedido."]}
-
-    async def _get_or_create_client_and_order(self, db: Session, chat_id: int, cart_data: Dict, client_details: Dict) -> Tuple[Client, Order]:
-        """Localiza o crea un cliente y luego crea un pedido a partir de los datos del carrito."""
-        client = get_client_by_email(db, email=client_details["email"])
-        if not client:
-            client = create_client(db, name=client_details["name"], email=client_details["email"], phone=client_details.get("phone"), address=client_details.get("address"))
-        else:
-            # Actualizar datos si el cliente ya existía pero está proporcionando nuevos
-            client.name = client_details["name"]
-            client.phone = client_details.get("phone", client.phone)
-            client.address = client_details.get("address", client.address)
-            db.commit()
-            db.refresh(client)
-        
-        order_items = [
-            order_schema.OrderItemCreate(product_sku=sku, quantity=item["quantity"], price=json.loads(item["product"])["price"])
-            for sku, item in cart_data["items"].items()
-        ]
-        
-        order_to_create = order_schema.OrderCreate(
-            client_id=client.client_id,
-            chat_id=str(chat_id),
-            customer_name=client.name,
-            customer_email=client.email,
-            shipping_address=client.address,
-            total_amount=cart_data["total_price"],
-            items=order_items
-        )
-        
-        order = order_crud.create_order(db, order=order_to_create)
-        return client, order
-
-    # ========================================
     # RESPUESTAS Y FORMATO
     # ========================================
-
-    def _format_cart_data(self, cart_data: Dict[str, Any]) -> str:
-        """Formatea los datos del carrito para una respuesta clara en Telegram."""
-        items = cart_data.get("items", {})
-        total_price = cart_data.get("total_price", 0.0)
-
-        response_text = "🛒 *Tu Carrito de Compras*\n\n"
-        for sku, item_details in items.items():
-            product_info = json.loads(item_details['product'])
-            price_str = f"{product_info.get('price', 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            subtotal_str = f"{item_details.get('quantity', 0) * product_info.get('price', 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            response_text += f"▪️ *{product_info.get('name', sku)}* ({sku})\n"
-            response_text += f"    `{item_details.get('quantity', 0)} x {price_str} € = {subtotal_str} €`\n\n"
-        
-        total_str = f"{total_price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        response_text += f"\n*Total: {total_str} €*"
-        return response_text
-
-    async def _create_cart_confirmation_response(self, db: Session, chat_id: int, initial_message: str = "") -> Dict[str, Any]:
-        """Crea una respuesta estándar post-actualización de carrito, incluyendo sugerencias."""
-        try:
-            async with self.cart_handler._get_api_client() as client:
-                response = await client.get(f"/cart/{chat_id}")
-                response.raise_for_status()
-                cart_content = self._format_cart_data(response.json())
-        except Exception as e:
-            logger.error(f"No se pudo obtener el carrito para la confirmación: {e}")
-            cart_content = "No pude mostrar tu carrito actualizado."
-        
-        suggestions = context_service.get_contextual_suggestions(db, chat_id)
-        final_message = f"{initial_message}{cart_content}\n\n{suggestions}"
-        
-        return {"type": "text_messages", "messages": [final_message]}
 
     async def _handle_conversational_response(self, message_text: str) -> Dict[str, Any]:
         """Maneja respuestas conversacionales generales con personalidad de vendedor experto."""
