@@ -2,10 +2,6 @@
 """
 Este archivo contiene los endpoints para la gestión de productos.
 
-Endpoints para la gestión de productos.
-
-Este archivo contiene los endpoints para la gestión de productos.
-
 Se encarga de gestionar las operaciones de creación, actualización, eliminación y lectura de productos.
 """
 
