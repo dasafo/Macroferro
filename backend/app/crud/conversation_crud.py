@@ -1,7 +1,5 @@
 # backend/app/crud/conversation_crud.py
 """
-Este archivo contiene las operaciones CRUD para el contexto conversacional del bot de Telegram.
-
 Operaciones CRUD para el contexto conversacional del bot de Telegram.
 
 Este módulo maneja el estado conversacional y el contexto del usuario utilizando

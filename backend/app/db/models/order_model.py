@@ -1,13 +1,6 @@
 # backend/app/db/models/order_model.py
 """
 Este archivo contiene el modelo de pedido para la aplicación.
-
-
-Modelos de pedido para la aplicación.
-
-Este archivo contiene los modelos de pedido para la aplicación.
-
-Se encarga de definir los modelos de pedido para la aplicación.
 """
 
 from sqlalchemy import (

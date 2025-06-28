@@ -1,7 +1,5 @@
 # backend/app/services/context_service.py
 """
-Servicio para gestionar la lógica de contexto y fluidez de la conversación.
-
 Este módulo se encarga de analizar el estado actual de la conversación
 para proporcionar sugerencias proactivas y mejorar la naturalidad del bot.
 """

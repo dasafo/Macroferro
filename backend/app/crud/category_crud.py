@@ -1,7 +1,5 @@
 # backend/app/crud/category_crud.py
 """
-Este archivo contiene las operaciones CRUD para el modelo Category.
-
 Operaciones CRUD (Create, Read, Update, Delete) para el modelo Category.
 
 Este módulo abstrae el acceso a la tabla de categorías, manejando la lógica

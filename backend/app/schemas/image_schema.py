@@ -1,9 +1,5 @@
 # backend/app/schemas/image_schema.py
 """
-Esquemas Pydantic para el modelo Image.
-
-Este archivo contiene los esquemas Pydantic para el modelo Image.
-
 Se encarga de definir los esquemas Pydantic para el modelo Image.
 """
 

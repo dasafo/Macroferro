@@ -1,11 +1,5 @@
 # backend/app/db/models/category_model.py
 """
-Este archivo contiene el modelo de categoría para la aplicación.
-
-Modelos de categoría para la aplicación.
-
-Este archivo contiene los modelos de categoría para la aplicación.
-
 Se encarga de definir los modelos de categoría para la aplicación.
 """
 

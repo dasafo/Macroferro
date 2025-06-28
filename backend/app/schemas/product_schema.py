@@ -1,9 +1,5 @@
 # backend/app/schemas/product.py
 """
-Esquemas Pydantic para el modelo Product.
-
-Este archivo contiene los esquemas Pydantic para el modelo Product.
-
 Se encarga de definir los esquemas Pydantic para el modelo Product.
 """
 
@@ -108,15 +104,3 @@ class ProductSearchResponse(BaseModel):
     """
     main_results: List[ProductResponse]
     related_results: List[ProductResponse]
-
-
-# ========================================
-# NOTAS SOBRE RENDIMIENTO
-# ========================================
-
-# Al usar esquemas con relaciones anidadas (category, images), es importante:
-# 1. Usar joinedload() en SQLAlchemy para evitar consultas N+1
-# 2. Considerar paginación para listas de productos
-# 3. Implementar campos opcionales (?include_images=true) para controlar respuestas
-# 4. Usar caché para categorías que cambian poco
-# 5. Evaluar GraphQL para consultas muy específicas en el futuro

@@ -26,17 +26,11 @@ from openai import AsyncOpenAI, OpenAI # Usar cliente asíncrono
 from qdrant_client import AsyncQdrantClient, QdrantClient, models as qdrant_models # Usar cliente asíncrono
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 from app.core.config import settings # Para acceder a QDRANT_URL, etc.
-# from app.schemas import image as image_schema  # Comentado hasta que se implemente image_schema
-# from app.core.exceptions import NotFoundError, InvalidOperationError
 
 # Configurar logger
 logger = logging.getLogger(__name__)
 
-# Futuras excepciones personalizadas para manejo específico de errores
-# from app.core.exceptions import NotFoundError, InvalidOperationError, ValidationError
 
-# NOTA: Algunas funcionalidades están preparadas para image_crud.py e image_schema.py
-# que se crearán en fases posteriores. Por ahora, product_crud maneja las relaciones básicas.
 
 class ProductService:
     """
@@ -166,27 +160,6 @@ class ProductService:
                 # raise NotFoundError(f"New category with id {product_in.category_id} not found.")
                 pass
 
-        # VALIDACIONES DE NEGOCIO FUTURAS:
-        
-        # 1. Validar cambios de precio críticos
-        # if product_in.price and product_in.price != product.price:
-        #     price_change_pct = abs(product_in.price - product.price) / product.price * 100
-        #     if price_change_pct > 20:  # Cambio mayor al 20%
-        #         # Requerir aprobación para cambios significativos
-        #         await self._request_price_change_approval(sku, product.price, product_in.price)
-        
-        # 2. Verificar impacto en órdenes pendientes
-        # if product_in.price and product_in.price > product.price:
-        #     pending_orders_count = await self._check_pending_orders(sku)
-        #     if pending_orders_count > 0:
-        #         logger.warning(f"Price increase for {sku} affects {pending_orders_count} pending orders")
-        
-        # 3. Validar especificaciones técnicas
-        # if product_in.spec_json:
-        #     validation_errors = self._validate_product_specifications(product_in.spec_json, product.category)
-        #     if validation_errors:
-        #         raise ValidationError(f"Invalid specifications: {validation_errors}")
-
         updated_product = product_crud.update_product(db=db, sku=sku, product=product_in)
         return updated_product
 
@@ -201,35 +174,6 @@ class ProductService:
             # raise NotFoundError(f"Product with SKU {sku} not found for deletion.")
             return None
         
-        # VALIDACIONES CRÍTICAS DE NEGOCIO (futuras):
-        
-        # 1. Verificar asociaciones con facturas (crítico para integridad contable)
-        # if invoice_items_count > 0:
-        #     raise InvalidOperationError(
-        #         f"Cannot delete product SKU {sku}: referenced in {invoice_items_count} invoice items. "
-        #         f"Consider marking as discontinued instead."
-        #     )
-        
-        # 2. Verificar impacto en inventario actual
-        # current_stock_value = self._calculate_total_stock_value(db, sku)
-        # if current_stock_value > 1000:  # Umbral configurable
-        #     logger.warning(f"Deleting product {sku} will write off ${current_stock_value:.2f} in inventory")
-        #     # Requerir confirmación adicional para alto valor
-        
-        # 3. Verificar dependencias en órdenes pendientes
-        # pending_references = await self._check_external_references(sku)
-        # if pending_references:
-        #     raise InvalidOperationError(f"Product {sku} has pending external references: {pending_references}")
-        
-        # 4. Logging crítico para auditoría
-        # await self._log_product_deletion(sku, product_to_delete, deletion_reason="API_REQUEST")
-
-        # OPERACIÓN DE ELIMINACIÓN
-        # Las foreign key constraints manejarán automáticamente:
-        # - product_images: CASCADE (elimina asociaciones con imágenes)
-        # - stock: CASCADE (elimina registros de inventario)
-        # - invoice_items: RESTRICT (previene eliminación si está facturado)
-        # 
         # Si hay restricciones, SQLAlchemy lanzará IntegrityError que debe capturarse en la API
         try:
             deleted_product = product_crud.delete_product(db, sku=sku)
@@ -242,9 +186,9 @@ class ProductService:
     async def search_products(
         self, db: Session, query_text: str, top_k: int = 5
     ) -> Dict[str, Any]:
-        # Esta implementación es un placeholder. En un caso real, aquí se generaría
-        # un embedding del query_text y se usaría para buscar en Qdrant.
-        # Por ahora, simplemente buscamos por texto en la base de datos.
+        """
+        Busca productos por texto y devuelve los resultados principales y relacionados.
+        """
         
         # Simulamos una búsqueda que podría ser semántica en el futuro
         products = await product_crud.search_products_by_term(db, search_term=query_text, top_k=top_k)

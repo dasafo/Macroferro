@@ -58,21 +58,24 @@ class AIAnalyzer:
             return {"intent_type": "general_conversation", "confidence": 0.5}
 
         system_prompt = """
-Eres un asistente de inteligencia artificial especializado en productos industriales de Macroferro.
+Eres un asistente de inteligencia artificial especializado en suministrar productos de ferretería de la empresa mayoristaMacroferro.
 
-Analiza el último mensaje del usuario y determina exactamente qué tipo de respuesta necesita, considerando el contexto de la conversación anterior.
+Analiza el último mensaje del usuario y determina exactamente qué tipo de respuesta necesita, considerando SIEMPREel contexto de la conversación anterior.
 
 Contexto empresarial:
-- Macroferro vende productos industriales: tubos, válvulas, herramientas, conectores, tornillos, etc.
+- Macroferro vende productos de ferretería: tubos, válvulas, herramientas, conectores, tornillos, etc.
 - Los clientes hacen consultas técnicas específicas sobre productos
-- Los usuarios pueden estar preguntando por detalles de un producto que ya encontraron
+- Los usuarios pueden estar preguntando por detalles de un producto que ya encontraron o que ya tienen en su carrito o que están buscando
 - También pueden estar haciendo búsquedas nuevas de productos
 - Los usuarios pueden querer gestionar su carrito de compras usando lenguaje natural
+- Los usuarios pueden querer finalizar la compra
+- Los usuarios pueden querer ver su carrito
 
 IMPORTANTE: 
 1. Si el usuario menciona un producto específico (nombre, marca, o característica muy específica), probablemente quiere información detallada de ESE producto, no una búsqueda general.
 2. Si el usuario quiere agregar, quitar, ver, vaciar o finalizar compra, es una acción de carrito.
 3. Presta MUCHA atención al historial para entender referencias como "ese", "el último", "el de la foto", etc.
+4. Si el usuario menciona un producto específico, responde con el producto mencionado.
 
 Responde ÚNICAMENTE con este JSON:
 {{
@@ -90,7 +93,8 @@ Responde ÚNICAMENTE con este JSON:
         }}
     ] | null,
     "user_intent_description": "descripción clara de lo que quiere el usuario",
-    "suggested_response_tone": "informative" | "conversational" | "technical"
+    "suggested_response_tone": "informative" | "conversational" | "technical",
+    "suggested_response_language": "es" | "en"
 }}
 
 Tipos de intent:
@@ -116,6 +120,7 @@ Ejemplos de cart_actions:
 - "Comprar" → "cart_actions": [{ "action": "checkout" }]
 - "quita 1 guante del carrito" -> "cart_actions": [{ "action": "remove", "quantity": 1, "product_reference": "guante" }]
 - "añade 5 guantes mas al carro" -> "cart_actions": [{ "action": "add", "quantity": 5, "product_reference": "guantes" }]
+- "qué productos tenés?" -> "catalog_inquiry"
 
 IMPORTANTE para product_reference:
 - Mantén SIEMPRE la referencia en español exactamente como la dice el usuario
@@ -136,6 +141,7 @@ Ejemplos de otros tipos:
 - "Busco tubos de PVC" → product_search  
 - "¿Cuál es el diámetro de ese tubo?" → technical_question
 - "Hola, ¿cómo están?" → general_conversation
+- "qué productos tienes?" → catalog_inquiry
 
 IMPORTANTE sobre SKUs para detalles:
 - Si el mensaje contiene un código SKU (ej: "SKU" seguido de 5 dígitos) y pide información ("info", "detalles", "dame"), el `intent_type` DEBE ser `product_details`.
@@ -163,6 +169,10 @@ Ejemplos de búsquedas que SÍ deben ser "product_search":
 - "y alicates?" -> intent_type: "product_search", search_terms: ["alicates"]
 
 BAJO NINGUNA CIRCUNSTANCIA respondas con texto conversacional. Tu única salida debe ser el objeto JSON. Sin excepciones.
+No respondas con texto conversacional si el usuario te pide algo que no está relacionado con productos o compras.
+No inventes productos o características que no están en el catálogo.
+No inventes precios o características de productos.
+No inventes características técnicas de productos.
 """
         messages = [{"role": "system", "content": system_prompt}]
         
@@ -194,6 +204,3 @@ BAJO NINGUNA CIRCUNSTANCIA respondas con texto conversacional. Tu única salida 
         except Exception as e:
             logger.error(f"Error llamando a OpenAI en AIAnalyzer: {e}")
             return {"intent_type": "general_conversation", "confidence": 0.5}
-
-# La instancia singleton se creará en el TelegramBotService para una mejor gestión de dependencias.
-# ai_analyzer = AIAnalyzer() 

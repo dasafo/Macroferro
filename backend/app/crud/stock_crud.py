@@ -2,8 +2,6 @@
 """
 Este archivo contiene las operaciones CRUD para el modelo Stock.
 
-Operaciones CRUD para el modelo Stock.
-
 Este módulo proporciona funciones para consultar y actualizar el stock de productos en diferentes almacenes.
 """
 

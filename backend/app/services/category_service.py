@@ -49,16 +49,6 @@ class CategoryService:
             
         Returns:
             Objeto Category si existe, None si no se encuentra
-            
-        Extensiones futuras:
-            - Verificación de permisos de lectura
-            - Logging de accesos a categorías específicas
-            - Caché de categorías frecuentemente accedidas
-            - Métricas de uso para análisis
-            
-        Manejo de errores futuro:
-            En lugar de devolver None, se podría lanzar NotFoundError
-            para un manejo de errores más explícito en la API.
         """
         return await category_crud.get_category(db, category_id=category_id)
 
@@ -76,13 +66,7 @@ class CategoryService:
             limit: Número máximo de registros a devolver
             
         Returns:
-            Lista paginada de categorías
-            
-        Validaciones de negocio futuras:
-            - Límites máximos de paginación por rol de usuario
-            - Filtrado automático según permisos del usuario
-            - Ordenamiento específico según preferencias de negocio
-            - Exclusión de categorías marcadas como inactivas
+            Lista paginada de categoría
         """
         if limit > 1000: # Prevenir consultas excesivamente grandes
             limit = 1000
@@ -104,15 +88,6 @@ class CategoryService:
         Returns:
             Lista de categorías raíz (sin parent_id)
             
-        Reglas de negocio aplicadas:
-            - Solo categorías activas (extensión futura)
-            - Ordenamiento por prioridad de negocio (extensión futura)
-            - Filtrado por visibilidad según contexto (extensión futura)
-            
-        Casos de uso:
-            - Construcción de menús principales de navegación
-            - Páginas de inicio con categorías destacadas
-            - APIs para aplicaciones móviles que necesitan estructura jerárquica
         """
         return await category_crud.get_root_categories(db)
     
@@ -132,15 +107,6 @@ class CategoryService:
             
         Returns:
             Lista de categorías hijas directas
-            
-        Validaciones consideradas (comentadas para Fase 1):
-            - Verificación de existencia de la categoría padre
-            - Evitar consultas innecesarias cuando el padre no existe
-            - Logging de navegación jerárquica para análisis
-            
-        Optimización actual:
-            Se evita la verificación explícita del padre para reducir consultas,
-            ya que si no existe, simplemente devolverá una lista vacía.
         """
         return await category_crud.get_subcategories(db, parent_id=parent_id)
 
@@ -162,21 +128,6 @@ class CategoryService:
             
         Returns:
             Objeto Category recién creado
-            
-        Validaciones de negocio implementadas:
-            1. Verificación de duplicados (nombre + parent_id)
-            2. Validación de existencia de categoría padre
-            3. Verificación de integridad de la jerarquía
-            
-        Consideraciones especiales para carga CSV:
-            Las validaciones están comentadas para permitir la carga inicial
-            desde archivos CSV, donde se asume que los datos son consistentes
-            y están en el orden correcto de dependencias.
-            
-        Reglas de negocio:
-            - No se permiten categorías duplicadas bajo el mismo padre
-            - Las categorías padre deben existir antes de crear hijas
-            - Los nombres de categorías son únicos dentro de su nivel jerárquico
         """
         existing_by_id = await category_crud.get_category(db, category_id=category_in.category_id)
         if existing_by_id:
@@ -219,22 +170,6 @@ class CategoryService:
             
         Returns:
             Objeto Category actualizado, o None si no existe
-            
-        Validaciones de negocio complejas:
-            1. Verificación de existencia de la categoría objetivo
-            2. Validación de duplicados considerando el estado actual
-            3. Verificación de existencia del nuevo padre
-            4. Prevención de ciclos en la jerarquía (extensión futura)
-            
-        Lógica de validación de duplicados:
-            - Solo valida si se cambia nombre o parent_id
-            - Excluye la categoría actual de la verificación de duplicados
-            - Construye el estado final para validación (merge de actual + cambios)
-            
-        Consideraciones de integridad:
-            - Cambiar parent_id puede afectar productos asociados
-            - Cambiar nombre puede afectar URLs y navegación
-            - Se requiere validación de ciclos para jerarquías complejas
         """
         db_category = await self.get_category_by_id(db, category_id)
         if not db_category:
@@ -279,26 +214,6 @@ class CategoryService:
             
         Returns:
             Objeto Category eliminado, o None si no existía
-            
-        Efectos colaterales (manejados por FK constraints):
-            - Productos: category_id se establece a NULL (quedan sin categoría)
-            - Subcategorías: parent_id se establece a NULL (se vuelven raíz)
-            
-        Validaciones de negocio recomendadas (futuras):
-            1. Verificar impacto en productos asociados
-            2. Evaluar si hay subcategorías que se volverían huérfanas
-            3. Requerir confirmación explícita para categorías con contenido
-            4. Considerar reasignación automática a categoría padre
-            
-        Consideraciones de auditoría:
-            - Logging de eliminaciones para trazabilidad
-            - Registro de productos afectados
-            - Notificación a administradores de cambios críticos
-            
-        Alternativas de implementación:
-            - Soft delete: Marcar como inactiva en lugar de eliminar
-            - Reasignación: Mover productos y subcategorías antes de eliminar
-            - Cascada controlada: Eliminar subcategorías vacías también
         """
         category = await self.get_category_by_id(db, category_id)
         if not category:
@@ -319,25 +234,3 @@ class CategoryService:
 # Instancia única del servicio para uso en endpoints
 # Patrón Singleton para evitar recrear instancias innecesariamente
 category_service = CategoryService()
-
-# ========================================
-# EXTENSIONES FUTURAS
-# ========================================
-
-# Métodos que se podrían agregar en futuras versiones:
-#
-# def get_category_hierarchy_path(self, db: Session, category_id: int) -> List[models.Category]:
-#     """Obtiene la ruta completa desde la raíz hasta la categoría especificada."""
-#     pass
-#
-# def validate_category_hierarchy_integrity(self, db: Session) -> List[str]:
-#     """Valida la integridad de toda la jerarquía de categorías."""
-#     pass
-#
-# def move_category_to_parent(self, db: Session, category_id: int, new_parent_id: Optional[int]) -> models.Category:
-#     """Mueve una categoría y todas sus subcategorías a un nuevo padre."""
-#     pass
-#
-# def get_category_usage_statistics(self, db: Session, category_id: int) -> Dict[str, Any]:
-#     """Obtiene estadísticas de uso de una categoría (productos, subcategorías, etc.)."""
-#     pass

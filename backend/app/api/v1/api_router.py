@@ -2,10 +2,6 @@
 """
 Este archivo contiene el router principal para la API versión 1.
 
-Router principal para la API versión 1.
-
-Este archivo contiene el router principal para la API versión 1.
-
 Se encarga de registrar y configurar todos los routers de la versión 1 de la API.
 """
 
@@ -42,17 +38,17 @@ api_router_v1.include_router(
 # ROUTER DE PRODUCTOS
 # Maneja operaciones CRUD para el catálogo de productos con filtros avanzados
 api_router_v1.include_router(
-    products.router,                # Router con endpoints de productos
-    prefix="/products",             # Prefijo: /api/v1/products
-    tags=["Products"]               # Tag para documentación OpenAPI/Swagger
+    products.router,                
+    prefix="/products",             
+    tags=["Products"]               
 )
 
 # ROUTER DE TELEGRAM BOT
 # Maneja webhook y operaciones del bot de Telegram
 api_router_v1.include_router(
-    telegram.router,                # Router con endpoints de Telegram
-    prefix="/telegram",             # Prefijo: /api/v1/telegram
-    tags=["Telegram Bot"]           # Tag para documentación OpenAPI/Swagger
+    telegram.router,                
+    prefix="/telegram",             
+    tags=["Telegram Bot"]        
 )
 
 # ROUTER DEL CARRITO

@@ -1,11 +1,8 @@
 # backend/app/schemas/order_schema.py
 """
-Esquemas Pydantic para los modelos Order y OrderItem.
-
-Este archivo contiene los esquemas Pydantic para los modelos Order y OrderItem.
-
 Se encarga de definir los esquemas Pydantic para los modelos Order y OrderItem.
 """
+
 from pydantic import BaseModel, EmailStr, Field, validator
 from typing import List, Optional
 from datetime import datetime

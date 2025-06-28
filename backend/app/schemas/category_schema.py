@@ -1,12 +1,6 @@
 # backend/app/schemas/category_schema.py
 """
 Esquemas Pydantic para el modelo Category.
-
-Los esquemas definen la estructura de datos que fluye a través de la API:
-- Validación automática de tipos de datos
-- Serialización/deserialización JSON
-- Documentación automática en OpenAPI/Swagger
-- Separación entre modelo de base de datos y API
 """
 
 from typing import Optional, List
@@ -49,17 +43,3 @@ class CategoryResponse(CategoryBase):
     # children: List["CategoryResponse"] = []
 
     model_config = ConfigDict(from_attributes=True)
-
-# ========================================
-# RESOLUCIÓN DE REFERENCIAS FUTURAS
-# ========================================
-
-# Para manejar la recursividad en la respuesta si mostramos hijos anidados
-# Esto se necesitaría si descomentáramos el campo 'children' en CategoryResponse
-# CategoryResponse.update_forward_refs()
-
-# Nota: La recursividad en esquemas puede causar problemas de rendimiento
-# en categorías con muchos niveles. Para casos complejos, considerar:
-# 1. Endpoints separados para obtener hijos: GET /categories/{id}/children
-# 2. Parámetros de consulta para controlar profundidad: ?include_children=true&max_depth=2
-# 3. Paginación en subcategorías si hay muchas

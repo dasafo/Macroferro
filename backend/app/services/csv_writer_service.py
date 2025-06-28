@@ -1,7 +1,5 @@
 # backend/app/services/csv_writer_service.py
 """
-Servicio de Escritura en CSV para la aplicación.
-
 Este servicio se encarga de escribir datos en archivos CSV, especialmente para
 la generación de facturas y registros de ventas. Utiliza un Lock para evitar
 condiciones de carrera si dos pedidos se procesan simultáneamente.

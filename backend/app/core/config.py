@@ -1,9 +1,6 @@
 # backend/app/core/config.py
 """
 Este archivo contiene la configuración de la aplicación.
-
-Configuración de la aplicación usando Pydantic BaseSettings.
-Variables sensibles desde .env, defaults seguros para el resto.
 """
 
 from pydantic_settings import BaseSettings

@@ -65,35 +65,3 @@ class TelegramResponse(BaseModel):
     chat_id: int
     text: str
     parse_mode: Optional[str] = "Markdown"
-
-# ========================================
-# NOTAS SOBRE INTEGRACIÓN
-# ========================================
-
-# Al usar estos esquemas en el endpoint del webhook:
-# 1. FastAPI valida automáticamente el JSON entrante contra TelegramUpdate
-# 2. Si la validación falla, retorna error 422 automáticamente
-# 3. Si pasa, tenemos objetos Python tipados para trabajar
-# 4. Para responder, creamos TelegramResponse y lo serializamos a JSON
-
-# Ejemplos de uso en el endpoint:
-# @router.post("/webhook")
-# async def telegram_webhook(update: TelegramUpdate):
-#     if update.message and update.message.text:
-#         response = TelegramResponse(
-#             chat_id=update.message.chat.id,
-#             text="¡Hola! ¿En qué puedo ayudarte?"
-#         )
-#         return response
-#     return {"status": "no_message"}
-
-# ========================================
-# EXTENSIONES FUTURAS
-# ========================================
-
-# Esquemas adicionales que podrían añadirse:
-# - TelegramInlineKeyboard: Para botones interactivos
-# - TelegramCallback: Para manejar respuestas de botones
-# - TelegramPhoto: Para procesar imágenes de productos
-# - TelegramLocation: Para búsquedas por ubicación
-# - TelegramContact: Para datos de contacto de clientes 

@@ -1,11 +1,5 @@
 # backend/app/db/models/client_model.py
 """
-Este archivo contiene el modelo de cliente para la aplicación.
-
-Modelos de cliente para la aplicación.
-
-Este archivo contiene los modelos de cliente para la aplicación.
-
 Se encarga de definir los modelos de cliente para la aplicación.
 """
 
