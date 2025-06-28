@@ -101,7 +101,7 @@ class TelegramBotService:
         
         try:
             # 1. Flujo de acciones pendientes (ej. checkout)
-            pending_action_info = get_pending_action(db, chat_id)
+            pending_action_info = await get_pending_action(chat_id)
             if pending_action_info:
                 current_action = pending_action_info.get("action")
                 action_data = pending_action_info.get("data", {})
@@ -130,22 +130,22 @@ class TelegramBotService:
                     bot_response_text = f"{caption}\n{additional}".strip()
             
             if bot_response_text:
-                add_turn_to_history(db, chat_id, message_text, bot_response_text)
+                await add_turn_to_history(chat_id, message_text, bot_response_text)
 
             return response_dict
             
         except asyncio.TimeoutError:
             logger.error(f"Timeout procesando mensaje de chat {chat_id}")
-            return self._create_error_response(db, chat_id, message_text, "⏱️ Lo siento, el procesamiento está tomando más tiempo del esperado. Por favor intenta nuevamente.")
+            return await self._create_error_response(chat_id, message_text, "⏱️ Lo siento, el procesamiento está tomando más tiempo del esperado. Por favor intenta nuevamente.")
             
         except Exception as e:
             logger.exception(f"Error fatal procesando mensaje de chat {chat_id}")
-            return self._create_error_response(db, chat_id, message_text, "❌ Lo siento, hubo un error grave procesando tu mensaje. Nuestro equipo ha sido notificado.")
+            return await self._create_error_response(chat_id, message_text, "❌ Lo siento, hubo un error grave procesando tu mensaje. Nuestro equipo ha sido notificado.")
 
-    def _create_error_response(self, db: Session, chat_id: int, user_message: str, error_text: str) -> Dict[str, Any]:
+    async def _create_error_response(self, chat_id: int, user_message: str, error_text: str) -> Dict[str, Any]:
         """Crea una respuesta de error estándar y la registra en el historial."""
         response_dict = {"type": "text_messages", "messages": [error_text]}
-        add_turn_to_history(db, chat_id, user_message, error_text)
+        await add_turn_to_history(chat_id, user_message, error_text)
         return response_dict
         
     async def _handle_command(self, db: Session, chat_id: int, message_text: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -173,7 +173,7 @@ class TelegramBotService:
         """Maneja mensajes en lenguaje natural usando IA."""
         logger.info(f"Analizando mensaje de chat {chat_id}: '{message_text}'")
 
-        history = get_conversation_history(db, chat_id, limit_turns=5)
+        history = await get_conversation_history(chat_id, limit_turns=5)
         analysis = await self.ai_analyzer.analyze_user_intent(message_text, history=history)
             
         intent_type = analysis.get("intent_type", "general_conversation")

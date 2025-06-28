@@ -24,6 +24,19 @@ class Product(Base):
     def images(self):
         return [assoc.image for assoc in self.images_association if assoc.image]
 
+    def to_dict(self):
+        """Convierte el objeto Product en un diccionario."""
+        return {
+            "sku": self.sku,
+            "name": self.name,
+            "description": self.description,
+            "price": float(self.price) if self.price is not None else 0.0,
+            "brand": self.brand,
+            "category_name": self.category.name if self.category else None,
+            "spec_json": self.spec_json or {},
+            "images": [img.url for img in self.images]
+        }
+
 
 class Image(Base):
     __tablename__ = "images"

@@ -20,7 +20,7 @@ from app.core.config import settings
 from app.services.product_service import ProductService
 from app.services.context_service import context_service
 from app.crud.product_crud import get_product_by_sku
-from app.crud.conversation_crud import get_recent_products, add_recent_product
+from app.crud.conversation_crud import get_recent_products, add_recent_product, get_user_context, update_user_context
 from app.api.deps import get_db
 from app.crud import category_crud
 
@@ -87,14 +87,15 @@ class ProductHandler:
             else:
                 # Prioridad 2: Resolver referencia en lenguaje natural.
                 logger.info("No se encontró SKU directo, intentando resolver referencia contextual.")
-                sku = await self._resolve_product_reference(db, message_text, chat_id)
+                sku = await self._resolve_product_reference(message_text, chat_id)
 
             if sku:
                 product = get_product_by_sku(db, sku)
                 if product:
-                    add_recent_product(db, chat_id, product.sku)
+                    product_data = product.to_dict() # Convertir a dict
+                    await add_recent_product(chat_id, product_data)
                     caption = self._format_product_details(product)
-                    suggestions = context_service.get_contextual_suggestions(db, chat_id)
+                    suggestions = await context_service.get_contextual_suggestions(chat_id)
                     return {
                         "type": "product_with_image",
                         "product": product,
@@ -156,8 +157,9 @@ class ProductHandler:
         products = product_crud.get_products(db, category_id=category.category_id, limit=10)
         
         # Guardar los productos encontrados en el contexto reciente del chat
-        for product in products:
-            add_recent_product(db, chat_id, product.sku)
+        product_dicts = [p.to_dict() for p in products]
+        for p_dict in product_dicts:
+            await add_recent_product(chat_id, p_dict)
 
         if not products:
             return {
@@ -175,7 +177,7 @@ class ProductHandler:
         for i, p in enumerate(products, 1):
             response_text += f"*{i}. {p.name}* ({p.sku})\n"
         
-        suggestions = context_service.get_contextual_suggestions(db, chat_id)
+        suggestions = await context_service.get_contextual_suggestions(chat_id)
         response_text += f"\n{suggestions}"
         
         return {
@@ -194,8 +196,9 @@ class ProductHandler:
         products = products_dict.get("products", [])
         
         # Guardar los productos encontrados en el contexto reciente del chat
-        for product in products:
-            add_recent_product(db, chat_id, product.sku)
+        product_dicts = [p.to_dict() for p in products]
+        for p_dict in product_dicts:
+            await add_recent_product(chat_id, p_dict)
             
         # Formatear la respuesta
         if not products:
@@ -218,7 +221,7 @@ class ProductHandler:
         if len(products) == 1:
             product = products[0]
             caption = self._format_product_details(product)
-            suggestions = context_service.get_contextual_suggestions(db, chat_id)
+            suggestions = await context_service.get_contextual_suggestions(chat_id)
             return {
                 "type": "product_with_image",
                 "product": product,
@@ -233,7 +236,7 @@ class ProductHandler:
             for i, p in enumerate(products, 1):
                 response_text += f"*{i}. {p.name}* ({p.sku})\n"
             
-            suggestions = context_service.get_contextual_suggestions(db, chat_id)
+            suggestions = await context_service.get_contextual_suggestions(chat_id)
             response_text += f"\n{suggestions}"
             
             return {
@@ -248,22 +251,25 @@ class ProductHandler:
         product_reference = analysis.get("specific_product_mentioned", "el producto")
         
         # Primero, intenta resolver la referencia a un producto concreto
-        sku = await self._resolve_product_reference(db, product_reference, chat_id)
+        sku = await self._resolve_product_reference(product_reference, chat_id)
         if not sku:
             return {"type": "text_messages", "messages": [f"No estoy seguro de a qué producto te refieres con '{product_reference}'. ¿Podrías ser más específico?"]}
             
-        product = get_product_by_sku(db, sku)
-        if not product:
-            return {"type": "text_messages", "messages": [f"No encontré el producto con SKU {sku}."]}
+        # El producto debería estar en el contexto reciente, no necesitamos ir a la BD
+        context = await get_user_context(chat_id)
+        product_data = next((p for p in context.get("recent_products", []) if p.get("sku") == sku), None)
+
+        if not product_data:
+            return {"type": "text_messages", "messages": [f"No encontré los detalles del producto con SKU {sku} en el contexto reciente."]}
             
         # Ahora, con el producto, consulta a OpenAI
         if not self.openai_client:
             return {"type": "text_messages", "messages": ["Lo siento, la función de análisis técnico no está disponible en este momento."]}
             
         prompt = f"""
-        Eres un experto técnico de Macroferro. Un cliente pregunta sobre el producto '{product.name}' (SKU: {product.sku}).
-        Descripción del producto: {product.description}
-        Características: {product.get_caracteristicas_str()}
+        Eres un experto técnico de Macroferro. Un cliente pregunta sobre el producto '{product_data.get('name')}' (SKU: {product_data.get('sku')}).
+        Descripción del producto: {product_data.get('description')}
+        Características: {product_data.get('spec_json')}
         
         Pregunta del cliente: "{question}"
         
@@ -279,7 +285,7 @@ class ProductHandler:
             )
             answer = response.choices[0].message.content
             
-            suggestions = context_service.get_contextual_suggestions(db, chat_id)
+            suggestions = await context_service.get_contextual_suggestions(chat_id)
             return {"type": "text_messages", "messages": [answer, suggestions]}
             
         except Exception as e:
@@ -308,72 +314,71 @@ class ProductHandler:
             
         return details
 
-    async def _resolve_product_reference(self, db: Session, reference: str, chat_id: int, action_context: str = None) -> Optional[str]:
+    async def _resolve_product_reference(self, reference: str, chat_id: int, action_context: str = None) -> Optional[str]:
         """
         Resuelve una referencia textual a un producto (ej: "ese martillo", "el número 2")
         basándose en el contexto de la conversación.
         """
         reference_lower = reference.lower()
+        context = await get_user_context(chat_id)
         
-        # Caso 0: Referencia directa al último producto visto (ej: "este", "esa", "el último")
-        demonstratives = ["este", "esta", "ese", "esa", "eso", "el último", "la última"]
-        if any(word in demonstratives for word in reference_lower.split()):
-            recent_products = get_recent_products(db, chat_id, limit=1)
-            if recent_products:
-                sku = recent_products[0]
-                logger.info(f"Referencia demostrativa '{reference}' resuelta al último SKU visto: {sku}.")
-                return sku
+        # Unificar todas las listas de productos relevantes en una sola para la búsqueda
+        # Damos prioridad a los productos del carrito
+        product_pool = []
+        product_skus_in_pool = set()
 
-        # Caso 1: Referencia numérica (ej: "el 2", "número 3")
+        # 1. Añadir productos del carrito
+        cart_data = context.get("cart", {})
+        cart_items = cart_data.get("items", {})
+        if cart_items:
+            for item in cart_items.values():
+                if item.get("product") and item["product"].get("sku") not in product_skus_in_pool:
+                    product_pool.append(item["product"])
+                    product_skus_in_pool.add(item["product"]["sku"])
+
+        # 2. Añadir productos recientes (que no estén ya en el pool desde el carrito)
+        recent_products = context.get("recent_products", [])
+        if recent_products:
+            for product in recent_products:
+                if product.get("sku") not in product_skus_in_pool:
+                    product_pool.append(product)
+                    product_skus_in_pool.add(product["sku"])
+        
+        # Si no hay productos en el contexto, no podemos resolver nada
+        if not product_pool:
+            return None
+
+        # --- INICIO DE LÓGICA DE RESOLUCIÓN ---
+        
+        # Caso A: Referencia numérica (ej: "el 2", "número 3")
+        # Esto debe usar la lista de productos recientes en el orden en que se vieron
         match = re.search(r'(?:del|el|número|la)\s+(\d+)', reference_lower)
         if match:
             try:
                 index = int(match.group(1)) - 1
-                # INVERTIR la lista de productos recientes para que el orden coincida con la visualización
-                recent_products = get_recent_products(db, chat_id, limit=10)[::-1]
-                if 0 <= index < len(recent_products):
-                    sku = recent_products[index]
+                
+                # Para referencias numéricas, usamos SÓLO los productos recientes en orden inverso
+                ordered_recent = list(recent_products)
+                ordered_recent.reverse()
+
+                if 0 <= index < len(ordered_recent):
+                    sku = ordered_recent[index].get("sku")
                     logger.info(f"Referencia numérica '{reference}' resuelta a SKU {sku} del historial.")
                     return sku
             except (ValueError, IndexError):
                 logger.warning(f"No se pudo resolver la referencia numérica: '{reference}'")
-                return None
+                # No retornamos None, permitimos que caiga a la búsqueda por texto
 
-        # Caso 2: Buscar en los productos que están actualmente en el carrito
-        if action_context == 'remove':
-            try:
-                async with httpx.AsyncClient(base_url=f"http://localhost:{settings.PORT}{settings.API_V1_STR}", timeout=10.0) as client:
-                    response = await client.get(f"/cart/{chat_id}")
-                    response.raise_for_status()
-                    cart_data = response.json()
-                    
-                    cart_items = cart_data.get("items", {})
-                    # La clave es el SKU, el valor es un dict con 'quantity' y 'product'
-                    # El campo 'product' ahora es un diccionario, no un string JSON.
-                    products_in_cart = [item['product'] for item in cart_items.values()]
-                                        
-                    # Buscamos en los productos del carrito
-                    sku = self._search_reference_in_product_list(reference, products_in_cart)
-                    if sku:
-                        logger.info(f"Referencia '{reference}' resuelta a SKU '{sku}' desde el carrito.")
-                        return sku
-            except Exception as e:
-                logger.error(f"Error al obtener carrito para resolver referencia '{action_context}': {e}")
-            return None
+        # Caso B: Referencia directa al último producto visto (ej: "este", "esa", "el último")
+        demonstratives = ["este", "esta", "ese", "esa", "eso", "el último", "la última"]
+        if any(word in demonstratives for word in reference_lower.split()):
+            if recent_products:
+                sku = recent_products[0].get("sku")
+                logger.info(f"Referencia demostrativa '{reference}' resuelta al último SKU visto: {sku}.")
+                return sku
         
-        # Para otros contextos ('add' o ninguno), buscamos en el historial de productos vistos.
-        product_skus = get_recent_products(db, chat_id, limit=10)
-        if not product_skus:
-            return None
-        
-        # Obtenemos los objetos Product completos
-        temp_db_session = next(get_db())
-        try:
-            products = [get_product_by_sku(temp_db_session, sku) for sku in product_skus if get_product_by_sku(temp_db_session, sku)]
-        finally:
-            temp_db_session.close()
-
-        return self._search_reference_in_product_list(reference, products)
+        # Caso C: Búsqueda por coincidencia de texto en todo el pool de productos
+        return self._search_reference_in_product_list(reference, product_pool)
 
     def _search_reference_in_product_list(self, reference: str, product_list: List[Any]) -> Optional[str]:
         """Busca la referencia en una lista de productos y devuelve el SKU del mejor match."""

@@ -1,240 +1,176 @@
 """
 Operaciones CRUD para el contexto conversacional del bot de Telegram.
 
-Este módulo maneja el estado conversacional y productos recientes vistos por los usuarios,
-proporcionando funcionalidades para mejorar la experiencia del chat bot.
+Este módulo maneja el estado conversacional y el contexto del usuario utilizando
+un único hash de Redis por usuario para garantizar la persistencia y la
+atomicidad de los datos conversacionales.
 """
-
-from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
 import json
-from datetime import datetime, timedelta
+import logging
+from typing import Dict, Any, List, Optional
+from redis.asyncio import Redis
+from sqlalchemy.orm import Session
+from app.core.config import settings
 
-# Por ahora usaremos un almacenamiento en memoria para estas funciones
-# En una implementación completa, estas deberían estar en base de datos
-_conversation_contexts: Dict[int, Dict[str, Any]] = {}
-_recent_products: Dict[int, List[str]] = {}
-_user_intents: Dict[int, List[Dict[str, Any]]] = {}
-_pending_actions: Dict[int, Dict[str, Any]] = {}
-_conversation_histories: Dict[int, List[Dict[str, str]]] = {}
+logger = logging.getLogger(__name__)
 
-def add_turn_to_history(db: Session, chat_id: int, user_message: str, bot_message: str):
+# Conexión a Redis (se manejará de forma lazy)
+_redis_client: Optional[Redis] = None
+
+def _get_redis_client() -> Redis:
+    """Inicializa y devuelve el cliente de Redis."""
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = Redis.from_url(
+            f"redis://{settings.REDIS_HOST}",
+            decode_responses=True
+        )
+    return _redis_client
+
+def _get_user_context_key(chat_id: int) -> str:
+    """Genera la clave de Redis para el hash de contexto de un usuario."""
+    return f"user_context:{chat_id}"
+
+# ===============================================
+# Funciones Principales de Gestión de Contexto
+# ===============================================
+
+async def get_user_context(chat_id: int) -> Dict[str, Any]:
     """
-    Añade un turno de conversación (pregunta de usuario y respuesta del bot) al historial.
+    Obtiene el contexto completo de un usuario desde Redis.
+    Si no existe, devuelve un contexto vacío.
     """
-    if chat_id not in _conversation_histories:
-        _conversation_histories[chat_id] = []
+    redis = _get_redis_client()
+    context_key = _get_user_context_key(chat_id)
     
-    _conversation_histories[chat_id].append({"role": "user", "content": user_message})
-    _conversation_histories[chat_id].append({"role": "assistant", "content": bot_message})
+    user_context_str = await redis.get(context_key)
+    if user_context_str:
+        try:
+            return json.loads(user_context_str)
+        except json.JSONDecodeError:
+            logger.error(f"Error decodificando JSON para el contexto del chat {chat_id}")
+            return {}
     
-    # Mantener solo los últimos 10 turnos (20 mensajes) para no exceder el límite de tokens de la IA
-    _conversation_histories[chat_id] = _conversation_histories[chat_id][-20:]
+    return {}
 
-def get_conversation_history(db: Session, chat_id: int, limit_turns: int = 5) -> List[Dict[str, str]]:
+async def update_user_context(chat_id: int, updates: Dict[str, Any]):
     """
-    Obtiene los últimos N turnos del historial de conversación.
+    Actualiza el contexto de un usuario en Redis. Carga el contexto actual,
+    lo actualiza con los nuevos datos y lo guarda de nuevo.
     """
-    if chat_id not in _conversation_histories:
-        return []
-        
-    # Multiplicamos por 2 porque cada turno son 2 mensajes (user y assistant)
+    redis = _get_redis_client()
+    context_key = _get_user_context_key(chat_id)
+    
+    # Obtenemos el contexto actual
+    current_context = await get_user_context(chat_id)
+    
+    # Aplicamos las actualizaciones
+    current_context.update(updates)
+    
+    # Guardamos el contexto completo actualizado
+    await redis.set(context_key, json.dumps(current_context))
+
+async def clear_user_context(chat_id: int):
+    """
+    Elimina completamente el contexto de un usuario de Redis.
+    Ideal para usar al finalizar una compra o al hacer logout.
+    """
+    redis = _get_redis_client()
+    context_key = _get_user_context_key(chat_id)
+    await redis.delete(context_key)
+
+# ===============================================
+# Helpers para Campos Específicos del Contexto
+# ===============================================
+
+async def add_turn_to_history(chat_id: int, user_message: str, bot_message: str):
+    """Añade un turno al historial de conversación dentro del contexto."""
+    context = await get_user_context(chat_id)
+    history = context.get("history", [])
+    
+    history.append({"role": "user", "content": user_message})
+    history.append({"role": "assistant", "content": bot_message})
+    
+    # Mantenemos solo los últimos 20 turnos (40 mensajes)
+    history = history[-40:]
+    
+    await update_user_context(chat_id, {"history": history})
+
+async def get_conversation_history(chat_id: int, limit_turns: int = 10) -> List[Dict[str, str]]:
+    """Obtiene el historial de conversación del contexto del usuario."""
+    context = await get_user_context(chat_id)
+    history = context.get("history", [])
     limit_messages = limit_turns * 2
-    return _conversation_histories[chat_id][-limit_messages:]
+    return history[-limit_messages:]
 
-def add_recent_product(db: Session, chat_id: int, sku: str) -> None:
+async def add_recent_product(chat_id: int, product_data: Dict[str, Any]):
     """
-    Añade un producto a la lista de productos recientes del usuario.
-    
-    Args:
-        db: Sesión de base de datos
-        chat_id: ID del chat
-        sku: SKU del producto
+    Añade un producto a la lista de productos recientes. Esta lista ahora
+    contiene los datos completos del producto para evitar búsquedas en BD.
     """
-    if chat_id not in _recent_products:
-        _recent_products[chat_id] = []
-    
-    # Eliminar el SKU si ya existe para evitar duplicados
-    if sku in _recent_products[chat_id]:
-        _recent_products[chat_id].remove(sku)
-    
-    # Añadir al principio de la lista
-    _recent_products[chat_id].insert(0, sku)
-    
-    # Mantener solo los últimos 10 productos
-    _recent_products[chat_id] = _recent_products[chat_id][:10]
+    sku = product_data.get("sku")
+    if not sku:
+        return
 
-def get_recent_products(db: Session, chat_id: int, limit: int = 5) -> List[str]:
-    """
-    Obtiene la lista de productos recientes del usuario.
+    context = await get_user_context(chat_id)
+    recent_products = context.get("recent_products", [])
     
-    Args:
-        db: Sesión de base de datos
-        chat_id: ID del chat
-        limit: Número máximo de productos a devolver
-        
-    Returns:
-        Lista de SKUs de productos recientes
-    """
-    if chat_id not in _recent_products:
-        return []
+    # Eliminar si ya existe para moverlo al frente
+    recent_products = [p for p in recent_products if p.get("sku") != sku]
     
-    return _recent_products[chat_id][:limit]
+    # Añadimos el producto completo al principio
+    recent_products.insert(0, product_data)
+    
+    # Mantenemos solo los 10 más recientes
+    recent_products = recent_products[:10]
+    
+    await update_user_context(chat_id, {"recent_products": recent_products})
 
-def update_conversation_context(db: Session, chat_id: int, context: Dict[str, Any]) -> None:
+async def get_recent_products(chat_id: int, limit: int = 10) -> List[Dict[str, Any]]:
     """
-    Actualiza el contexto conversacional del usuario.
-    
-    Args:
-        db: Sesión de base de datos
-        chat_id: ID del chat
-        context: Contexto conversacional
+    Obtiene la lista de productos recientes (como dicts) del contexto.
     """
-    _conversation_contexts[chat_id] = context
+    context = await get_user_context(chat_id)
+    return context.get("recent_products", [])[:limit]
 
-def get_conversation_context(db: Session, chat_id: int) -> Dict[str, Any]:
-    """
-    Obtiene el contexto conversacional del usuario.
-    
-    Args:
-        db: Sesión de base de datos
-        chat_id: ID del chat
-        
-    Returns:
-        Contexto conversacional
-    """
-    return _conversation_contexts.get(chat_id, {})
-
-def update_search_context(db: Session, chat_id: int, search_query: str, results: List[str]) -> None:
-    """
-    Actualiza el contexto de búsqueda del usuario.
-    
-    Args:
-        db: Sesión de base de datos
-        chat_id: ID del chat
-        search_query: Consulta de búsqueda
-        results: Lista de SKUs de resultados
-    """
-    context = get_conversation_context(db, chat_id)
-    context['last_search'] = {
-        'query': search_query,
-        'results': results,
-        'timestamp': datetime.now().isoformat()
+async def update_search_context(chat_id: int, search_query: str, results: List[Dict[str, Any]]):
+    """Actualiza el contexto de la última búsqueda con resultados completos."""
+    search_context = {
+        "last_search_query": search_query,
+        "last_search_results": results # Guardamos los productos completos
     }
-    update_conversation_context(db, chat_id, context)
+    await update_user_context(chat_id, search_context)
+    # También añadimos los resultados a los productos recientes
+    for product in results:
+        await add_recent_product(chat_id, product)
 
+async def set_pending_action(chat_id: int, action: Optional[str], data: Optional[Dict[str, Any]] = None):
+    """Establece o limpia la acción pendiente en el contexto del usuario."""
+    redis = _get_redis_client()
+    context_key = _get_user_context_key(chat_id)
+    current_context = await get_user_context(chat_id)
+
+    if action:
+        current_context["pending_action"] = {"action": action, "data": data or {}}
+    else:
+        current_context.pop("pending_action", None)
+
+    if not current_context:
+        await redis.delete(context_key)
+    else:
+        await redis.set(context_key, json.dumps(current_context))
+
+async def get_pending_action(chat_id: int) -> Optional[Dict[str, Any]]:
+    """Obtiene la acción pendiente del contexto del usuario."""
+    context = await get_user_context(chat_id)
+    return context.get("pending_action")
+
+async def clear_pending_action(chat_id: int):
+    """Limpia la acción pendiente del contexto de un usuario."""
+    await set_pending_action(chat_id, None)
+
+# Funciones dummy que ya no se usan en la nueva arquitectura
+# Se mantienen por si algún módulo antiguo aún las llama, para evitar crashes.
 def add_recent_intent(db: Session, chat_id: int, intent: str, confidence: float) -> None:
-    """
-    Añade una intención reciente del usuario.
-    
-    Args:
-        db: Sesión de base de datos
-        chat_id: ID del chat
-        intent: Tipo de intención
-        confidence: Confianza de la intención
-    """
-    if chat_id not in _user_intents:
-        _user_intents[chat_id] = []
-    
-    intent_data = {
-        'intent': intent,
-        'confidence': confidence,
-        'timestamp': datetime.now().isoformat()
-    }
-    
-    _user_intents[chat_id].insert(0, intent_data)
-    
-    # Mantener solo las últimas 20 intenciones
-    _user_intents[chat_id] = _user_intents[chat_id][:20]
-
-def get_recent_intents(db: Session, chat_id: int, limit: int = 5) -> List[Dict[str, Any]]:
-    """
-    Obtiene las intenciones recientes del usuario.
-    
-    Args:
-        db: Sesión de base de datos
-        chat_id: ID del chat
-        limit: Número máximo de intenciones a devolver
-        
-    Returns:
-        Lista de intenciones recientes
-    """
-    if chat_id not in _user_intents:
-        return []
-    
-    return _user_intents[chat_id][:limit]
-
-def get_last_user_intent(db: Session, chat_id: int) -> Optional[str]:
-    """
-    Obtiene la intención más reciente del usuario.
-    
-    Args:
-        db: Sesión de base de datos
-        chat_id: ID del chat
-        
-    Returns:
-        La intención más reciente o None
-    """
-    intents = get_recent_intents(db, chat_id, limit=1)
-    if intents:
-        return intents[0].get('intent')
-    return None
-
-def set_pending_action(db: Session, chat_id: int, action: str, data: Dict[str, Any] = None) -> None:
-    """
-    Establece una acción pendiente para el usuario.
-    
-    Args:
-        db: Sesión de base de datos
-        chat_id: ID del chat
-        action: Tipo de acción pendiente
-        data: Datos adicionales de la acción
-    """
-    _pending_actions[chat_id] = {
-        'action': action,
-        'data': data or {},
-        'timestamp': datetime.now().isoformat()
-    }
-
-def get_pending_action(db: Session, chat_id: int) -> Optional[Dict[str, Any]]:
-    """
-    Obtiene la acción pendiente del usuario.
-    
-    Args:
-        db: Sesión de base de datos
-        chat_id: ID del chat
-        
-    Returns:
-        Acción pendiente o None
-    """
-    return _pending_actions.get(chat_id)
-
-def clear_pending_action(db: Session, chat_id: int) -> None:
-    """
-    Limpia la acción pendiente del usuario.
-    
-    Args:
-        db: Sesión de base de datos
-        chat_id: ID del chat
-    """
-    if chat_id in _pending_actions:
-        del _pending_actions[chat_id]
-
-def clear_user_context(db: Session, chat_id: int) -> None:
-    """
-    Limpia todo el contexto del usuario.
-    
-    Args:
-        db: Sesión de base de datos
-        chat_id: ID del chat
-    """
-    if chat_id in _conversation_contexts:
-        del _conversation_contexts[chat_id]
-    if chat_id in _recent_products:
-        del _recent_products[chat_id]
-    if chat_id in _user_intents:
-        del _user_intents[chat_id]
-    if chat_id in _pending_actions:
-        del _pending_actions[chat_id]
-    if chat_id in _conversation_histories:
-        del _conversation_histories[chat_id] 
+    logger.debug(f"Llamada a función obsoleta: add_recent_intent para chat {chat_id}")
+    pass 

@@ -10,35 +10,34 @@ from app.crud import conversation_crud as crud
 
 class ContextService:
 
-    def get_contextual_suggestions(self, db: Session, chat_id: int) -> str:
+    async def get_contextual_suggestions(self, chat_id: int) -> str:
         """
-        Genera una cadena de texto con sugerencias contextuales basadas en la última acción del usuario.
+        Genera una cadena de texto con sugerencias contextuales basadas en las últimas acciones.
         """
-        last_intent = crud.get_last_user_intent(db, chat_id)
-        
+        history = await crud.get_conversation_history(chat_id, limit_turns=2)
+        last_bot_message = ""
+        if history and history[-1]["role"] == "assistant":
+            last_bot_message = history[-1]["content"].lower()
+
         suggestions = []
-        
-        if not last_intent:
-            suggestions = ["Puedes buscar productos (ej: 'busco tornillos')", "ver las categorías principales"]
-        
-        elif last_intent == 'product_search':
-            suggestions = ["puedes pedir más detalles de un producto", "añadir uno al carrito (ej: 'añade el 2')"]
-        
-        elif last_intent == 'product_details':
+
+        # Lógica basada en el contenido del último mensaje del bot
+        if "he añadido el producto a tu carrito" in last_bot_message:
+            return "Puedes seguir buscando, `ver tu carrito` o `finalizar la compra`."
+        elif "aquí están los detalles" in last_bot_message:
             suggestions = ["añadirlo al carrito", "preguntar por productos similares", "volver a buscar"]
-
-        elif last_intent == 'technical_question':
-            suggestions = ["añadir el producto analizado al carrito", "ver otros productos"]
+        elif "encontré estos productos" in last_bot_message or "aquí tienes algunos productos de la categoría" in last_bot_message:
+            suggestions = ["pedir más detalles de un producto (ej: 'dime más del 2')", "añadir uno al carrito (ej: 'añade el 1')"]
+        elif "estos son los detalles de tu carrito" in last_bot_message:
+            return "Puedes `eliminar` un producto, `vaciar` el carrito, `seguir comprando` o `finalizar la compra`."
+        else: # Default
+            suggestions = ["buscar productos (ej: 'busco tornillos')", "ver las categorías"]
             
-        elif last_intent == 'cart_action':
-            # Si la última acción fue sobre el carrito, las sugerencias son siempre las mismas
-            return "Puedes seguir buscando productos, `ver tu carrito` o `finalizar la compra`."
-
         if not suggestions:
             return "Recuerda que puedes `ver el carrito` o pedir `ayuda`."
             
         # Formatear sugerencias en una sola línea
-        return "💡 Ahora, " + " o ".join(suggestions) + "."
+        return "💡 Ahora, puedes " + " o ".join(suggestions) + "."
 
 # Instancia singleton del servicio
 context_service = ContextService()

@@ -11,13 +11,12 @@ import json
 
 from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
-import httpx
 
 from app.core.config import settings
 from app.services.email_service import send_invoice_email
 from app.services.bot_components.cart_handler import CartHandler
 from app.crud import client_crud, order_crud
-from app.crud.conversation_crud import set_pending_action, clear_pending_action
+from app.crud.conversation_crud import get_user_context, set_pending_action, clear_user_context
 from app.schemas import order_schema
 from app.db.models.client_model import Client
 from app.db.models.order_model import Order
@@ -42,28 +41,22 @@ class CheckoutHandler:
         """
         Inicia el flujo de checkout, mostrando el resumen del carrito y la primera pregunta.
         """
-        try:
-            async with self.cart_handler._get_api_client() as client:
-                get_response = await client.get(f"/cart/{chat_id}")
-                get_response.raise_for_status()
-                cart_data = get_response.json()
-                if not cart_data.get("items"):
-                    return {"type": "text_messages", "messages": ["🛒 Tu carrito está vacío."]}
+        context = await get_user_context(chat_id)
+        cart_data = context.get("cart")
 
-                cart_summary = self.cart_handler._format_cart_data(cart_data)
-                clear_pending_action(db, chat_id)
-                set_pending_action(db, chat_id, "checkout_ask_if_recurrent", {})
-                
-                return {
-                    "type": "text_messages",
-                    "messages": [
-                        f"✅ *Proceso de Compra Iniciado*\n\n{cart_summary}",
-                        "👋 Antes de continuar, ¿ya eres cliente nuestro? (responde *sí* o *no*)"
-                    ]
-                }
-        except httpx.HTTPError as e:
-            logger.error(f"Error de API en checkout para chat {chat_id}: {e}")
-            return {"type": "text_messages", "messages": ["❌ Lo siento, ocurrió un error al procesar tu pedido."]}
+        if not cart_data or not cart_data.get("items"):
+            return {"type": "text_messages", "messages": ["🛒 Tu carrito está vacío."]}
+
+        cart_summary = self.cart_handler._format_cart_data(cart_data)
+        await set_pending_action(chat_id, "checkout_ask_if_recurrent", {})
+        
+        return {
+            "type": "text_messages",
+            "messages": [
+                f"✅ *Proceso de Compra Iniciado*\n\n{cart_summary}",
+                "👋 Antes de continuar, ¿ya eres cliente nuestro? (responde *sí* o *no*)"
+            ]
+        }
 
     def is_interrupting_message(self, text: str) -> bool:
         """
@@ -85,10 +78,10 @@ class CheckoutHandler:
 
         if current_action == "checkout_ask_if_recurrent":
             if 'sí' in user_response or 'si' in user_response:
-                set_pending_action(db, chat_id, "checkout_get_recurrent_email", {})
+                await set_pending_action(chat_id, "checkout_get_recurrent_email", {})
                 return {"type": "text_messages", "messages": ["¡Genial! Por favor, envíame tu *correo electrónico* para buscar tus datos."]}
             elif 'no' in user_response:
-                set_pending_action(db, chat_id, "checkout_collect_name", {})
+                await set_pending_action(chat_id, "checkout_collect_name", {})
                 return {"type": "text_messages", "messages": ["Entendido. Comencemos con el registro.\n\n👤 Por favor, envíame tu *nombre completo*:"]}
             else:
                 return {"type": "text_messages", "messages": ["🤔 No entendí tu respuesta. Por favor, responde solo *sí* o *no*."]}
@@ -98,32 +91,32 @@ class CheckoutHandler:
             client = client_crud.get_client_by_email(db, email)
             if client:
                 action_data = {"name": client.name, "email": client.email, "phone": client.phone, "address": client.address}
-                set_pending_action(db, chat_id, "checkout_confirm_recurrent_data", action_data)
+                await set_pending_action(chat_id, "checkout_confirm_recurrent_data", action_data)
                 return {"type": "text_messages", "messages": [f"¡Hola de nuevo, *{client.name}*! 👋\n\nHe encontrado estos datos:\n📞 Teléfono: *{client.phone}*\n🏠 Dirección: *{client.address}*\n\n¿Son correctos para el envío? (*sí* o *no*)"]}
             else:
-                set_pending_action(db, chat_id, "checkout_collect_name", {"email": email})
+                await set_pending_action(chat_id, "checkout_collect_name", {"email": email})
                 return {"type": "text_messages", "messages": ["No encontré tus datos. Vamos a registrarlos.\n\n👤 Para empezar, ¿cuál es tu *nombre completo*?"]}
 
         elif current_action == "checkout_confirm_recurrent_data":
             if 'sí' in user_response or 'si' in user_response:
                 return await self._finalize_checkout(db, chat_id, action_data, background_tasks)
             else:
-                set_pending_action(db, chat_id, "checkout_collect_name", {"email": action_data.get("email")})
+                await set_pending_action(chat_id, "checkout_collect_name", {"email": action_data.get("email")})
                 return {"type": "text_messages", "messages": ["Entendido, actualicemos tus datos.\n\n👤 Por favor, envíame tu *nombre completo*:"]}
         
         elif current_action == "checkout_collect_name":
             action_data["name"] = message_text.strip()
-            set_pending_action(db, chat_id, "checkout_collect_email", action_data)
+            await set_pending_action(chat_id, "checkout_collect_email", action_data)
             return {"type": "text_messages", "messages": [f"✅ Perfecto, *{action_data['name']}*.\n\n📧 Ahora envíame tu *correo electrónico*:"]}
 
         elif current_action == "checkout_collect_email":
             action_data["email"] = user_response
-            set_pending_action(db, chat_id, "checkout_collect_phone", action_data)
+            await set_pending_action(chat_id, "checkout_collect_phone", action_data)
             return {"type": "text_messages", "messages": [f"✅ Email guardado.\n\n📱 Ahora envíame tu *número de teléfono*:"]}
         
         elif current_action == "checkout_collect_phone":
             action_data["phone"] = message_text.strip()
-            set_pending_action(db, chat_id, "checkout_collect_address", action_data)
+            await set_pending_action(chat_id, "checkout_collect_address", action_data)
             return {"type": "text_messages", "messages": [f"✅ Teléfono guardado.\n\n🏠 Por último, envíame tu *dirección de envío completa*:"]}
 
         elif current_action == "checkout_collect_address":
@@ -138,27 +131,22 @@ class CheckoutHandler:
         Finaliza la compra: crea pedido, limpia carrito, envía emails, y notifica al usuario.
         """
         try:
-            async with self.cart_handler._get_api_client() as client:
-                cart_response = await client.get(f"/cart/{chat_id}")
-                cart_response.raise_for_status()
-                cart_data = cart_response.json()
+            context = await get_user_context(chat_id)
+            cart_data = context.get("cart")
 
-            if not cart_data.get("items"):
-                clear_pending_action(db, chat_id)
+            if not cart_data or not cart_data.get("items"):
+                await set_pending_action(chat_id, None)
                 return {"type": "text_messages", "messages": ["🛒 Tu carrito está vacío. No se puede finalizar la compra."]}
 
             client_obj, order_obj = await self._get_or_create_client_and_order(db, chat_id, cart_data, customer_data)
 
-            await self.cart_handler.clear_cart(chat_id)
-            clear_pending_action(db, chat_id)
+            # Limpiamos todo el contexto del usuario, incluido el carrito
+            await clear_user_context(chat_id)
             
             background_tasks.add_task(send_invoice_email, email_to=client_obj.email, order_data=order_obj.to_dict())
 
             return {"type": "text_messages", "messages": [f"🎉 *¡Gracias por tu compra, {client_obj.name}!* \n\n✅ Tu pedido `#{order_obj.order_id}` ha sido confirmado.\nTe hemos enviado un email a *{client_obj.email}* con los detalles."]}
 
-        except httpx.HTTPError as e:
-            logger.error(f"Error de API en checkout final para chat {chat_id}: {e}")
-            return {"type": "text_messages", "messages": ["❌ Lo siento, ocurrió un error con tu carrito."]}
         except Exception as e:
             logger.error(f"Error inesperado en checkout final para chat {chat_id}: {e}", exc_info=True)
             return {"type": "text_messages", "messages": ["❌ Ocurrió un error inesperado al procesar tu pedido."]}
