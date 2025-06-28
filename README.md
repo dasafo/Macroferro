@@ -43,7 +43,7 @@
 
 - **[Esquema de la Base de Datos](./docs/schema_db.md)**: Descripción detallada de todas las tablas, columnas y relaciones de la base de datos.
 - **[Estructura del Proyecto](./docs/Estructura.md)**: Un mapa completo de todas las carpetas y archivos del backend.
-- **[Hoja de Ruta del Proyecto](./docs/carrito.md)**: El estado actual del desarrollo, fases completadas y próximas funcionalidades.
+- **[Hoja de Ruta del Proyecto](./docs/roadmap.md)**: El estado actual del desarrollo, fases completadas y próximas funcionalidades.
 - **[Guía de Desarrollo y Túnel](./docs/guia_desarrollo_tunnel.md)**: Instrucciones para levantar el entorno de desarrollo, gestionar el túnel y depurar problemas.
 
 ## 🧰 Scripts Clave
@@ -536,6 +536,14 @@ docker compose logs backend | grep checkout
 
 # Verificar base de datos
 docker compose exec postgres psql -U macroferro_user -d macroferro -c "SELECT * FROM orders LIMIT 5;"
+```
+
+**💧 Fuga de Conexiones o Errores Asíncronos (`SAWarning`, `MissingGreenlet`):**
+```bash
+# CAUSA: Una tarea en segundo plano está intentando usar una sesión de BD cerrada.
+# SOLUCIÓN: La tarea de fondo NO debe recibir la sesión del endpoint. Debe crear la suya propia.
+# Revisa la sección "Arquitectura Asíncrona" en /docs/guia_desarrollo_tunnel.md para la explicación completa.
+docker compose logs backend | grep "SAWarning\|MissingGreenlet"
 ```
 
 ---

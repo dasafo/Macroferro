@@ -102,4 +102,71 @@ Si el script automático falla por alguna razón, puedes recurrir al script manu
 ```bash
 ./scripts/start_tunnel.sh
 ```
-*Este script probablemente contenga una lógica más directa para iniciar el túnel sin el monitoreo automático.* 
+*Este script probablemente contenga una lógica más directa para iniciar el túnel sin el monitoreo automático.*
+
+---
+
+## 🏛️ Arquitectura Asíncrona: Reglas de Oro
+
+Después de una refactorización profunda, todo el backend opera de forma asíncrona. Esto introduce nuevas reglas que son **críticas** para evitar errores sutiles y fugas de recursos.
+
+### **Regla #1: Las Tareas en Segundo Plano Gestionan su Propia Sesión de Base de Datos**
+
+Este es el principio más importante.
+
+- **El Problema:** Cuando un endpoint de FastAPI (como `/webhook`) recibe una petición, obtiene una sesión de base de datos (`db`) a través de `Depends(get_db)`. Si este endpoint delega el trabajo a una tarea en segundo plano (`background_tasks.add_task`) y termina, la sesión `db` original se cierra inmediatamente. Si se pasa esa sesión cerrada a la tarea de fondo, cualquier intento de usarla resultará en errores (`MissingGreenlet`, `SAWarning`, etc.).
+
+- **La Solución:** **NUNCA** pases un objeto `db` de un endpoint a una tarea en segundo plano. La tarea debe ser independiente y gestionar su propio ciclo de vida de la sesión.
+
+**Ejemplo de código CORRECTO:**
+
+```python
+# En endpoints/telegram.py
+
+# El endpoint NO depende de get_db, porque delega el trabajo
+@router.post("/webhook")
+async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
+    # ...
+    # NO se pasa 'db' a la tarea
+    background_tasks.add_task(process_update, update_data)
+    # ...
+
+# La tarea de fondo crea y cierra su propia sesión
+async def process_update(update_data: dict):
+    # ...
+    async with AsyncSessionLocal() as db:  # <- ¡AQUÍ ESTÁ LA MAGIA!
+        # Ahora puedes usar 'db' de forma segura
+        await bot_service.process_message(db, update_data)
+    # La sesión se cierra automáticamente al salir del bloque 'with'
+```
+
+### **Regla #2: Cuidado con la Carga Perezosa (Lazy Loading) en Tareas de Fondo**
+
+- **El Problema:** Incluso si pasas un objeto de SQLAlchemy (como un `Order` o `Client`) que fue cargado en una sesión válida a una tarea de fondo, puedes tener problemas. Si el objeto tiene relaciones que se cargan de forma perezosa (p. ej., `order.items`), la tarea de fondo intentará acceder a ellas, pero la sesión original ya estará cerrada.
+
+- **La Solución:** Asegúrate de que todos los datos necesarios estén completamente cargados **antes** de pasar un objeto a una tarea de fondo.
+
+**Ejemplo de código CORRECTO:**
+
+```python
+# Cargar un pedido y sus items explícitamente antes de usarlo en un background task
+
+# MAL ❌
+order = await get_order(db, order_id) # Carga perezosa de order.items
+background_tasks.add_task(send_email, order.to_dict()) # Fallará
+
+# BIEN ✅
+from sqlalchemy.orm import joinedload
+#...
+result = await db.execute(
+    select(Order)
+    .filter(Order.order_id == order.order_id)
+    .options(
+        joinedload(Order.items).joinedload(OrderItem.product) # Carga toda la cadena
+    )
+)
+order_fully_loaded = result.unique().scalars().one()
+
+# Ahora es seguro pasarlo
+background_tasks.add_task(send_email, order_fully_loaded.to_dict())
+``` 

@@ -95,7 +95,7 @@ Aquí reside la **lógica de negocio principal**. Esta capa orquesta las operaci
     *   `product_handler.py`: Gestiona todo lo relacionado con la búsqueda de productos, ya sea por texto, semántica o SKU.
     *   `cart_handler.py`: Encapsula toda la lógica para gestionar el carrito de la compra en Redis (añadir, ver, eliminar, vaciar).
     *   `checkout_handler.py`: Orquesta el proceso de finalización de la compra, guiando al usuario para recoger sus datos y crear el pedido.
-*   `email_service.py`: (En desarrollo) Gestionará el envío de correos transaccionales, como las confirmaciones de pedido.
+*   `email_service.py`: Gestiona el envío de correos transaccionales, como la factura de confirmación del pedido.
 
 ---
 
@@ -122,7 +122,7 @@ Aquí reside la **lógica de negocio principal**. Esta capa orquesta las operaci
 
 | Archivo        | Contenido                                                                        |
 | -------------- | -------------------------------------------------------------------------------- |
-| `hoja_ruta.md` | Roadmap en fases (del entorno hasta notificaciones). Úsalo para marcar progreso. |
+| `roadmap.md` | Roadmap en fases (del entorno hasta notificaciones). Úsalo para marcar progreso. |
 
 ---
 
