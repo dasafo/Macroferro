@@ -7,6 +7,9 @@ los componentes básicos que serán utilizados por toda la aplicación:
 - Motor de base de datos (engine)
 - Fábrica de sesiones (SessionLocal)  
 - Clase base para modelos (Base)
+
+La función get_db() se encuentra en app/api/deps.py siguiendo las mejores
+prácticas de FastAPI y manteniendo las dependencias separadas de la configuración.
 """
 
 from typing import AsyncGenerator
@@ -31,11 +34,3 @@ AsyncSessionLocal = async_sessionmaker(
 # Todos los modelos en models.py heredarán de esta clase
 # Proporciona funcionalidad común como metadatos de tabla y mapeo ORM
 Base = declarative_base()
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Dependencia de FastAPI para obtener una sesión de base de datos asíncrona.
-    Se asegura de que la sesión se cierre siempre después de la petición.
-    """
-    async with AsyncSessionLocal() as session:
-        yield session

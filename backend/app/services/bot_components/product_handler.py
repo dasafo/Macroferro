@@ -18,8 +18,8 @@ from app.core.config import settings
 from app.services.product_service import ProductService
 from app.services.context_service import context_service
 from app.crud.product_crud import get_product_by_sku
-from app.crud.conversation_crud import get_recent_products, add_recent_product, get_user_context, update_user_context
-from app.api.deps import get_db
+from app.crud.conversation_crud import get_recent_products, add_recent_product, get_user_context, update_user_context, add_recent_products_batch
+from app.api import deps
 from app.crud import category_crud, product_crud
 
 logger = logging.getLogger(__name__)
@@ -153,10 +153,9 @@ class ProductHandler:
         # Usamos el product_crud directamente para buscar por category_id
         products = await product_crud.get_products(db, category_id=category.category_id, limit=10)
         
-        # Guardar los productos encontrados en el contexto reciente del chat
+        # Guardar los productos encontrados en el contexto reciente del chat preservando el orden
         product_dicts = [p.to_dict() for p in products]
-        for p_dict in product_dicts:
-            await add_recent_product(chat_id, p_dict)
+        await add_recent_products_batch(chat_id, product_dicts, preserve_order=True)
 
         if not products:
             return {
@@ -192,10 +191,9 @@ class ProductHandler:
         products_dict = await self.product_service.search_products(db, query_text=query, top_k=5)
         products = products_dict.get("products", [])
         
-        # Guardar los productos encontrados en el contexto reciente del chat
+        # Guardar los productos encontrados en el contexto reciente del chat preservando el orden
         product_dicts = [p.to_dict() for p in products]
-        for p_dict in product_dicts:
-            await add_recent_product(chat_id, p_dict)
+        await add_recent_products_batch(chat_id, product_dicts, preserve_order=True)
             
         # Formatear la respuesta
         if not products:
@@ -375,13 +373,43 @@ class ProductHandler:
                     logger.info(f"Referencia '{reference}' resuelta por ordinal de texto a SKU: {sku}")
                     return sku
         
-        # Estrategia 3: Búsqueda por palabras clave en nombre, marca o SKU (como fallback)
+        # Estrategia 3: Búsqueda por palabras clave en nombre, marca o SKU (mejorada)
+        reference_words = reference.lower().split()
+        best_match = None
+        best_score = 0
+        
         for product in recent_products:
-            if reference.lower() in product.get('name', '').lower() or \
-               reference.lower() in product.get('brand', '').lower() or \
-               reference.lower() == product.get('sku', '').lower():
-                logger.info(f"Referencia '{reference}' resuelta por keyword a SKU: {product['sku']}")
+            product_name = product.get('name', '').lower()
+            product_brand = product.get('brand', '').lower()
+            product_sku = product.get('sku', '').lower()
+            
+            # Búsqueda exacta por SKU
+            if reference.lower() == product_sku:
+                logger.info(f"Referencia '{reference}' resuelta por SKU exacto: {product['sku']}")
                 return product['sku']
+            
+            # Calcular score de coincidencia con el nombre del producto
+            score = 0
+            for word in reference_words:
+                if word in product_name:
+                    score += 2  # Coincidencia en nombre vale más
+                elif word in product_brand:
+                    score += 1  # Coincidencia en marca vale menos
+            
+            # Si encontramos una coincidencia mejor, la guardamos
+            if score > best_score:
+                best_score = score
+                best_match = product
+            
+            # Búsqueda de coincidencia completa (referencia contenida en nombre)
+            if reference.lower() in product_name:
+                logger.info(f"Referencia '{reference}' resuelta por coincidencia completa en nombre: {product['sku']}")
+                return product['sku']
+        
+        # Si encontramos una buena coincidencia parcial, la usamos
+        if best_match and best_score >= len(reference_words):
+            logger.info(f"Referencia '{reference}' resuelta por coincidencia parcial (score: {best_score}): {best_match['sku']}")
+            return best_match['sku']
 
         logger.warning(f"No se pudo resolver la referencia '{reference}' con las estrategias actuales.")
         return None

@@ -9,6 +9,9 @@ Este archivo contiene los modelos de producto para la aplicación.
 Se encarga de definir los modelos de producto para la aplicación.
 """
 
+from sqlalchemy import Column, String, Integer, ForeignKey, Text, Numeric
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import relationship
 from app.db.database import Base
 
 class Product(Base):

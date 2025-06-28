@@ -2,17 +2,14 @@
 """
 Este archivo contiene los endpoints para el carrito de compras.
 
-Endpoints para el carrito de compras.
-
-Este archivo contiene los endpoints para el carrito de compras.
-
 Se encarga de gestionar las operaciones de agregar productos, eliminar productos,
 obtener el contenido del carrito y procesar el checkout.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Body
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
+import logging
 
 from app.api import deps
 from app.core.config import Settings
@@ -22,16 +19,20 @@ from app.services.cart_service import CartService
 from app.crud import order_crud, product_crud, stock_crud
 from app.schemas.cart_schema import CartItemCreate, Cart
 
+# Router para el carrito de compras
 router = APIRouter()
 
 def get_cart_service(settings: Settings = Depends(deps.get_settings)):
+    """
+    Dependencia para obtener el servicio de carrito.
+    """
     return CartService(settings)
 
 @router.post("/{chat_id}/items", status_code=201, response_model=Cart)
 async def add_item_to_cart(
     chat_id: str,
     item: CartItemCreate,
-    db: Session = Depends(deps.get_db),
+    db: AsyncSession = Depends(deps.get_db),
     cart_service: CartService = Depends(get_cart_service)
 ):
     """
@@ -66,6 +67,7 @@ async def add_item_to_cart(
 @router.get("/{chat_id}", response_model=Cart)
 async def get_cart(
     chat_id: str,
+    db: AsyncSession = Depends(deps.get_db),
     cart_service: CartService = Depends(get_cart_service)
 ):
     """
@@ -104,7 +106,7 @@ async def remove_item_from_cart(
 @router.post("/{chat_id}/checkout", response_model=Order)
 async def checkout(
     chat_id: str,
-    db: Session = Depends(deps.get_db),
+    db: AsyncSession = Depends(deps.get_db),
     cart_service: CartService = Depends(get_cart_service)
 ):
     """

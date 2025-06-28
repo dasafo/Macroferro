@@ -10,7 +10,7 @@ Se encarga de gestionar las operaciones de creación, actualización, eliminaci�
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 import logging
 
@@ -24,7 +24,7 @@ router = APIRouter()
 @router.post("/", response_model=product_schema.ProductResponse, status_code=status.HTTP_201_CREATED)
 async def create_product(
     *,
-    db: Session = Depends(deps.get_db),
+    db: AsyncSession = Depends(deps.get_db),
     product_in: product_schema.ProductCreate,
 ) -> product_schema.ProductResponse:
     """Crea un nuevo producto en el catálogo."""
@@ -55,7 +55,7 @@ async def create_product(
 @router.put("/{sku}", response_model=product_schema.ProductResponse)
 async def update_product(
     *,
-    db: Session = Depends(deps.get_db),
+    db: AsyncSession = Depends(deps.get_db),
     sku: str,
     product_in: product_schema.ProductUpdate,
 ) -> product_schema.ProductResponse:
@@ -82,7 +82,7 @@ async def update_product(
 @router.delete("/{sku}", response_model=product_schema.ProductResponse)
 async def delete_product(
     *,
-    db: Session = Depends(deps.get_db),
+    db: AsyncSession = Depends(deps.get_db),
     sku: str,
 ) -> product_schema.ProductResponse:
     """Elimina un producto del sistema."""
@@ -103,7 +103,7 @@ async def delete_product(
 @router.get("/{sku}", response_model=product_schema.ProductResponse)
 async def read_product(
     *,
-    db: Session = Depends(deps.get_db),
+    db: AsyncSession = Depends(deps.get_db),
     sku: str,
 ) -> product_schema.ProductResponse:
     """Obtiene los detalles de un producto por SKU."""
@@ -119,7 +119,7 @@ async def read_product(
 
 @router.get("/", response_model=List[product_schema.ProductResponse])
 async def read_products(
-    db: Session = Depends(deps.get_db),
+    db: AsyncSession = Depends(deps.get_db),
     skip: int = 0,
     limit: int = Query(default=100, ge=1, le=200),
     category_id: Optional[int] = None,
@@ -143,7 +143,7 @@ async def read_products(
 @router.post("/search", response_model=product_schema.ProductSearchResponse)
 async def search_products(
     query: product_schema.ProductSearchQuery,
-    db: Session = Depends(deps.get_db)
+    db: AsyncSession = Depends(deps.get_db)
 ) -> product_schema.ProductSearchResponse:
     """Realiza una búsqueda semántica de productos."""
     logger.info(f"🎯 BÚSQUEDA: Iniciando búsqueda para '{query.query_text}' con top_k={query.top_k}")

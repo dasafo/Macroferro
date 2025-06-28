@@ -129,6 +129,42 @@ async def add_recent_product(chat_id: int, product_data: Dict[str, Any]):
     
     await update_user_context(chat_id, {"recent_products": recent_products})
 
+async def add_recent_products_batch(chat_id: int, products_data: List[Dict[str, Any]], preserve_order: bool = True):
+    """
+    Añade múltiples productos a la lista de productos recientes preservando el orden original.
+    Esta función es especialmente útil para resultados de búsquedas por categoría o texto.
+    
+    Args:
+        chat_id: ID del chat
+        products_data: Lista de productos como diccionarios
+        preserve_order: Si True, mantiene el orden de la lista. Si False, usa el comportamiento normal.
+    """
+    if not products_data:
+        return
+
+    context = await get_user_context(chat_id)
+    recent_products = context.get("recent_products", [])
+    
+    if preserve_order:
+        # Remover productos existentes que están en la nueva lista
+        existing_skus = {p.get("sku") for p in products_data}
+        recent_products = [p for p in recent_products if p.get("sku") not in existing_skus]
+        
+        # Añadir los nuevos productos al inicio en el orden correcto
+        recent_products = products_data + recent_products
+    else:
+        # Comportamiento normal: añadir uno por uno al principio (orden inverso)
+        for product_data in products_data:
+            sku = product_data.get("sku")
+            if sku:
+                recent_products = [p for p in recent_products if p.get("sku") != sku]
+                recent_products.insert(0, product_data)
+    
+    # Mantenemos solo los 10 más recientes
+    recent_products = recent_products[:10]
+    
+    await update_user_context(chat_id, {"recent_products": recent_products})
+
 async def get_recent_products(chat_id: int, limit: int = 10) -> List[Dict[str, Any]]:
     """
     Obtiene la lista de productos recientes (como dicts) del contexto.

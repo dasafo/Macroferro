@@ -54,7 +54,7 @@ class CartHandler:
             # se gestiona en CheckoutHandler.
             # Por simplicidad, asumimos que checkout, view y clear vienen solas.
             if action == "view":
-                return await self.view_cart(chat_id)
+                return await self.view_cart(chat_id, db)
             elif action == "clear":
                 return await self.clear_cart(chat_id)
             elif action == "add":
@@ -134,7 +134,7 @@ class CartHandler:
         
         return await self._create_cart_confirmation_response(chat_id, db, initial_message=f"{message}\n\n")
 
-    async def view_cart(self, chat_id: int) -> Dict[str, Any]:
+    async def view_cart(self, chat_id: int, db: AsyncSession = None) -> Dict[str, Any]:
         """Maneja la visualización del carrito."""
         context = await get_user_context(chat_id)
         cart = context.get("cart", {})
@@ -142,7 +142,12 @@ class CartHandler:
         if not cart.get("items"):
             return {"type": "text_messages", "messages": ["🛒 Tu carrito está vacío."]}
         
-        return await self._create_cart_confirmation_response(chat_id)
+        if db is None:
+            # Si no hay db, crear respuesta simple sin sugerencias
+            cart_content = self._format_cart_data(cart)
+            return {"type": "text_messages", "messages": [cart_content]}
+        
+        return await self._create_cart_confirmation_response(chat_id, db)
 
     async def remove_item_by_command(self, db: AsyncSession, chat_id: int, args: List[str]) -> Dict[str, Any]:
         """Maneja el comando /eliminar <SKU> [cantidad]."""
@@ -165,18 +170,100 @@ class CartHandler:
         """Maneja quitar del carrito desde lenguaje natural."""
         product_reference = action_details.get("product_reference", "")
         quantity_to_remove = action_details.get("quantity")
+        
+        logger.info(f"natural_remove_from_cart - product_reference: '{product_reference}', quantity: {quantity_to_remove}, type: {type(quantity_to_remove)}")
 
         if not product_reference:
             return {"type": "text_messages", "messages": ["🤔 No pude identificar qué producto quieres quitar."]}
+        
+        # Primero buscar específicamente en el carrito
+        context = await get_user_context(chat_id)
+        cart = context.get("cart", {})
+        items = cart.get("items", {})
+        
+        if not items:
+            return {"type": "text_messages", "messages": ["🛒 Tu carrito está vacío."]}
+        
+        # Buscar el producto en el carrito por referencia
+        sku = await self._resolve_product_reference_in_cart(product_reference, items)
+        
+        # Si no se encuentra en el carrito, usar la resolución general
+        if not sku:
+            sku = await self.product_handler._resolve_product_reference(product_reference, chat_id)
             
-        sku = await self.product_handler._resolve_product_reference(product_reference, chat_id)
         if not sku:
             return {"type": "text_messages", "messages": [f"🤔 No pude identificar '{product_reference}' en tu carrito."]}
         
-        if quantity_to_remove:
-            return await self._add_item_to_cart(db, chat_id, sku, -int(quantity_to_remove))
+        logger.info(f"Producto resuelto: SKU {sku}")
         
+        # Verificar que el producto está en el carrito
+        if sku not in items:
+            return {"type": "text_messages", "messages": [f"🤔 El producto no está en tu carrito actualmente."]}
+        
+        current_quantity = items[sku].get("quantity", 0)
+        logger.info(f"Cantidad actual en carrito para {sku}: {current_quantity}")
+        
+        if quantity_to_remove is not None:
+            try:
+                quantity_to_remove = int(quantity_to_remove)
+                logger.info(f"Intentando quitar {quantity_to_remove} unidades de {sku}")
+                
+                if quantity_to_remove <= 0:
+                    return {"type": "text_messages", "messages": ["❌ La cantidad a quitar debe ser mayor que cero."]}
+                
+                if quantity_to_remove > current_quantity:
+                    return {"type": "text_messages", "messages": [f"❌ No puedes quitar {quantity_to_remove} unidades. Solo tienes {current_quantity} en el carrito."]}
+                
+                return await self._add_item_to_cart(db, chat_id, sku, -quantity_to_remove)
+            except (ValueError, TypeError) as e:
+                logger.error(f"Error convirtiendo quantity_to_remove a int: {e}")
+                return {"type": "text_messages", "messages": ["❌ La cantidad especificada no es válida."]}
+        
+        # Si no se especifica cantidad, eliminar todo el producto
+        logger.info(f"No se especificó cantidad, eliminando todo el producto {sku}")
         return await self._remove_item_from_cart(chat_id, sku)
+
+    async def _resolve_product_reference_in_cart(self, reference: str, cart_items: Dict) -> str:
+        """Resuelve una referencia de producto específicamente en los items del carrito."""
+        reference = reference.lower()
+        reference_words = reference.split()
+        
+        best_match = None
+        best_score = 0
+        
+        for sku, item_data in cart_items.items():
+            product = item_data.get("product", {})
+            product_name = product.get('name', '').lower()
+            product_brand = product.get('brand', '').lower()
+            
+            # Búsqueda exacta por SKU
+            if reference == sku.lower():
+                logger.info(f"Referencia '{reference}' resuelta por SKU exacto en carrito: {sku}")
+                return sku
+            
+            # Búsqueda de coincidencia completa en nombre
+            if reference in product_name:
+                logger.info(f"Referencia '{reference}' resuelta por coincidencia completa en carrito: {sku}")
+                return sku
+            
+            # Calcular score de coincidencia
+            score = 0
+            for word in reference_words:
+                if word in product_name:
+                    score += 2
+                elif word in product_brand:
+                    score += 1
+            
+            if score > best_score:
+                best_score = score
+                best_match = sku
+        
+        # Si encontramos una buena coincidencia parcial
+        if best_match and best_score >= len(reference_words):
+            logger.info(f"Referencia '{reference}' resuelta por coincidencia parcial en carrito (score: {best_score}): {best_match}")
+            return best_match
+            
+        return None
 
     async def _remove_item_from_cart(self, chat_id: int, sku: str) -> Dict[str, Any]:
         """Lógica central para quitar un item completo del carrito."""

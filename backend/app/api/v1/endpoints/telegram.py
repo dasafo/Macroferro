@@ -11,14 +11,14 @@ Se encarga de gestionar las operaciones de procesamiento de mensajes entrantes d
 
 import logging
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, Dict, Any
 import hashlib
 import hmac
 import json
 
 from app.core.config import settings
-from app.api.deps import get_db
+from app.api import deps
 from app.schemas.telegram_schema import TelegramUpdate
 from app.services.telegram_service import TelegramBotService
 from app.db.database import AsyncSessionLocal
@@ -231,7 +231,7 @@ async def webhook_status():
 @router.post("/test")
 async def test_webhook(
     request_data: dict,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(deps.get_db)
 ):
     """
     Endpoint de prueba para simular mensajes de Telegram sin validación de firma.

@@ -35,7 +35,7 @@ from app.services.bot_components.checkout_handler import CheckoutHandler
 from app.crud.client_crud import get_client_by_email, create_client
 from app.crud import order_crud
 from app.schemas import order_schema
-from app.api.deps import get_db
+from app.api import deps
 from app.crud.conversation_crud import (
     get_recent_products, 
     add_recent_product, 
