@@ -45,6 +45,7 @@
 - **[Estructura del Proyecto](./docs/Estructura.md)**: Un mapa completo de todas las carpetas y archivos del backend.
 - **[Hoja de Ruta del Proyecto](./docs/roadmap.md)**: El estado actual del desarrollo, fases completadas y próximas funcionalidades.
 - **[Guía de Desarrollo y Túnel](./docs/guia_desarrollo_tunnel.md)**: Instrucciones para levantar el entorno de desarrollo, gestionar el túnel y depurar problemas.
+- **[Flujo completo de interacción cliente-bot](docs/FLUJO_INTERACCION.md)**: Demostración de conversaciones con entre el bot y el cliente con un ejemplo real paso a paso.
 
 ## 🧰 Scripts Clave
 
@@ -564,3 +565,4 @@ Para preguntas técnicas o contribuciones, revisar la documentación en `/docs` 
 <p align="center">
   <sub>Created with ❤️ by David Salas - dasafodata</sub>
 </p>
+
