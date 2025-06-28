@@ -16,40 +16,8 @@ Principales ventajas de este enfoque:
 
 from typing import Generator
 from sqlalchemy.orm import Session
-from app.db.database import SessionLocal # Importamos SessionLocal desde db.database
+from app.db.database import get_db
 from app.core.config import settings
-
-def get_db() -> Generator[Session, None, None]:
-    """
-    Dependencia de FastAPI para obtener una sesión de base de datos.
-    
-    Esta función implementa el patrón Context Manager para garantizar
-    que las sesiones de base de datos se gestionen correctamente:
-    
-    1. Crea una nueva sesión para cada request HTTP
-    2. La sesión se mantiene activa durante todo el procesamiento del request
-    3. La sesión se cierra automáticamente al finalizar, incluso si hay errores
-    
-    Uso típico en un endpoint:
-    ```python
-    @app.get("/products/")
-    def get_products(db: Session = Depends(get_db)):
-        return db.query(Product).all()
-    ```
-    
-    Returns:
-        Generator[Session, None, None]: Generador que produce una sesión de SQLAlchemy
-    
-    Note:
-        FastAPI maneja automáticamente el ciclo de vida del generador:
-        - yield db: proporciona la sesión al endpoint
-        - finally: se ejecuta después del endpoint, cerrando la sesión
-    """
-    db = SessionLocal()
-    try:
-        yield db  # Proporciona la sesión al endpoint que la solicite
-    finally:
-        db.close()  # Garantiza que la sesión se cierre siempre, incluso con excepciones
 
 def get_settings():
     """

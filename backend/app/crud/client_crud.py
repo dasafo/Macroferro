@@ -1,22 +1,22 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import func, cast, Integer
+from sqlalchemy import func, cast, Integer, select
 from sqlalchemy.sql.functions import max as sql_max
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from app.db.models.client_model import Client
 
-def get_client_by_email(db: Session, email: str) -> Optional[Client]:
+async def get_client_by_email(db: AsyncSession, email: str) -> Optional[Client]:
     """
-    Busca un cliente por su dirección de correo electrónico.
+    Busca un cliente por su dirección de correo electrónico de forma asíncrona.
     """
-    return db.query(Client).filter(Client.email == email).first()
+    result = await db.execute(select(Client).filter(Client.email == email))
+    return result.scalars().first()
 
-def create_client(db: Session, name: str, email: str, phone: str, address: str) -> Client:
+async def create_client(db: AsyncSession, name: str, email: str, phone: Optional[str] = None, address: Optional[str] = None) -> Client:
     """
-    Crea un nuevo cliente en la base de datos con un ID numérico secuencial.
+    Crea un nuevo cliente en la base de datos con un ID numérico secuencial de forma asíncrona.
     """
-    # Usar una expresión regular para encontrar solo los IDs con formato CUST<números>
-    # Esto evita errores con IDs que no siguen el patrón, como los generados por UUID.
-    max_id_query = db.query(
+    max_id_query = select(
         sql_max(
             cast(
                 func.substr(Client.client_id, 5), 
@@ -25,12 +25,11 @@ def create_client(db: Session, name: str, email: str, phone: str, address: str) 
         )
     ).filter(Client.client_id.op("~")('^CUST[0-9]+$'))
     
-    max_id = max_id_query.scalar()
+    max_id_result = await db.execute(max_id_query)
+    max_id = max_id_result.scalar()
     
-    # Si no hay clientes o ninguno sigue el patrón, empezar desde 1000
     next_id_num = (max_id + 1) if max_id is not None else 1000
     
-    # Formatear el nuevo ID
     new_client_id = f"CUST{next_id_num}"
     
     db_client = Client(
@@ -41,6 +40,6 @@ def create_client(db: Session, name: str, email: str, phone: str, address: str) 
         address=address
     )
     db.add(db_client)
-    db.commit()
-    db.refresh(db_client)
+    await db.commit()
+    await db.refresh(db_client)
     return db_client 

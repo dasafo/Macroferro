@@ -1,7 +1,7 @@
 fastapi[all]
 uvicorn[standard]
-psycopg2-binary
-redis
+psycopg2-binary==2.9.9
+redis==5.0.1
 qdrant-client>=1.7.0
 openai>=1.0.0
 sqlalchemy
@@ -11,7 +11,7 @@ python-dotenv
 passlib[bcrypt]
 python-multipart
 aiohttp>=3.8.0
-httpx>=0.24.0
+httpx>=0.26.0
 python-jose[cryptography]
 tenacity
 fastapi-mail
@@ -21,3 +21,7 @@ weasyprint
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
+
+SQLAlchemy==2.0.25
+alembic==1.13.1
+asyncpg==0.29.0

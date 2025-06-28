@@ -17,12 +17,17 @@ class Product(Base):
     spec_json = Column(JSONB, nullable=True)
 
     category = relationship("Category", back_populates="products")
-    images_association = relationship("ProductImage", back_populates="product", cascade="all, delete-orphan")
+    _images_association = relationship("ProductImage", back_populates="product", cascade="all, delete-orphan")
+    
+    images = relationship(
+        "Image",
+        secondary="product_images",
+        back_populates="products",
+        viewonly=True,
+        sync_backref=False
+    )
+    
     stock_levels = relationship("Stock", back_populates="product", cascade="all, delete-orphan")
-
-    @property
-    def images(self):
-        return [assoc.image for assoc in self.images_association if assoc.image]
 
     def to_dict(self):
         """Convierte el objeto Product en un diccionario."""
@@ -44,7 +49,14 @@ class Image(Base):
     image_id = Column(Integer, primary_key=True, autoincrement=True)
     url = Column(Text, unique=True, nullable=False, index=True)
     alt_text = Column(String(255), nullable=True)
-
+    
+    products = relationship(
+        "Product",
+        secondary="product_images",
+        back_populates="images",
+        viewonly=True,
+        sync_backref=False
+    )
     products_association = relationship("ProductImage", back_populates="image", cascade="all, delete-orphan")
 
 
@@ -54,5 +66,5 @@ class ProductImage(Base):
     sku = Column(String(50), ForeignKey("products.sku", ondelete="CASCADE"), primary_key=True)
     image_id = Column(Integer, ForeignKey("images.image_id", ondelete="CASCADE"), primary_key=True)
 
-    product = relationship("Product", back_populates="images_association")
+    product = relationship("Product", back_populates="_images_association")
     image = relationship("Image", back_populates="products_association") 

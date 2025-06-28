@@ -21,6 +21,10 @@ Patrones implementados:
 
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from sqlalchemy import func
 
 from app.db.models.category_model import Category
 from app.schemas import category_schema # Importamos los schemas Pydantic para categorías
@@ -29,7 +33,7 @@ from app.schemas import category_schema # Importamos los schemas Pydantic para c
 # OPERACIONES DE LECTURA (READ)
 # ========================================
 
-def get_category(db: Session, category_id: int) -> Optional[Category]:
+async def get_category(db: AsyncSession, category_id: int) -> Optional[Category]:
     """
     Obtiene una categoría por su ID.
     
@@ -48,10 +52,11 @@ def get_category(db: Session, category_id: int) -> Optional[Category]:
         if category:
             print(f"Categoría encontrada: {category.name}")
     """
-    return db.query(Category).filter(Category.category_id == category_id).first()
+    result = await db.execute(select(Category).filter(Category.category_id == category_id))
+    return result.scalars().first()
 
 
-def get_category_by_name_and_parent(db: Session, name: str, parent_id: Optional[int]) -> Optional[Category]:
+async def get_category_by_name_and_parent(db: AsyncSession, name: str, parent_id: Optional[int]) -> Optional[Category]:
     """
     Obtiene una categoría por su nombre y parent_id.
     
@@ -74,17 +79,18 @@ def get_category_by_name_and_parent(db: Session, name: str, parent_id: Optional[
         # Verificar si "Eléctricas" ya existe bajo la categoría padre ID 1
         existing = get_category_by_name_and_parent(db, "Eléctricas", 1)
     """
-    query = db.query(Category).filter(Category.name == name)
+    query = select(Category).filter(Category.name == name)
     
     # Manejo especial para categorías raíz (parent_id = None)
     if parent_id is None:
         query = query.filter(Category.parent_id.is_(None))
     else:
         query = query.filter(Category.parent_id == parent_id)
-    return query.first()
+    result = await db.execute(query)
+    return result.scalars().first()
 
 
-def get_categories(db: Session, skip: int = 0, limit: int = 100) -> List[Category]:
+async def get_categories(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[Category]:
     """
     Obtiene una lista paginada de todas las categorías.
     
@@ -105,106 +111,47 @@ def get_categories(db: Session, skip: int = 0, limit: int = 100) -> List[Categor
         - El orden por defecto es por ID, considerar ordenar por name si es necesario
         - Para UI, combinar con get_total_categories() para mostrar paginación completa
     """
-    return db.query(Category).offset(skip).limit(limit).all()
+    result = await db.execute(select(Category).offset(skip).limit(limit))
+    return result.scalars().all()
 
 
-def get_root_categories(db: Session, skip: int = 0, limit: int = 100) -> List[Category]:
+async def get_root_categories(db: AsyncSession) -> List[Category]:
     """
-    Obtiene todas las categorías raíz (nivel superior de la jerarquía).
-    
-    Las categorías raíz son aquellas que no tienen parent_id, formando
-    el primer nivel de la jerarquía del catálogo. Son especialmente útiles
-    para construir menús de navegación y vistas jerárquicas.
-    
-    Args:
-        db: Sesión de SQLAlchemy
-        skip: Número de registros a omitir (para paginación)
-        limit: Número máximo de registros a devolver
-        
-    Returns:
-        Lista de categorías raíz ordenadas por ID
-        
-    Casos de uso típicos:
-        - Construcción de menús principales de navegación
-        - Páginas de categorías principales en e-commerce
-        - Estructuras de árbol en interfaces de administración
-        
-    Ejemplo:
-        root_cats = get_root_categories(db)
-        for cat in root_cats:
-            print(f"Categoría principal: {cat.name}")
+    Obtiene las categorías principales (aquellas sin un padre) de forma asíncrona.
     """
-    return db.query(Category).filter(Category.parent_id.is_(None)).offset(skip).limit(limit).all()
+    result = await db.execute(select(Category).filter(Category.parent_id == None))
+    return result.scalars().all()
 
 
-def get_child_categories(db: Session, parent_id: int, skip: int = 0, limit: int = 100) -> List[Category]:
+async def get_subcategories(db: AsyncSession, parent_id: int) -> List[Category]:
     """
-    Obtiene las subcategorías directas de una categoría padre.
-    
-    Esta función permite navegar un nivel hacia abajo en la jerarquía,
-    obteniendo solo los hijos directos (no nietos). Es fundamental para
-    construir navegación incremental y evitar cargar toda la jerarquía.
-    
-    Args:
-        db: Sesión de SQLAlchemy
-        parent_id: ID de la categoría padre
-        skip: Número de registros a omitir (para paginación)
-        limit: Número máximo de registros a devolver
-        
-    Returns:
-        Lista de categorías hijas directas
-        
-    Casos de uso:
-        - Navegación drill-down en catálogos
-        - Construcción de menús desplegables
-        - Lazy loading de subcategorías en interfaces
-        
-    Extensión futura:
-        Para obtener toda la descendencia (hijos, nietos, etc.):
-        - Usar consultas recursivas (CTE)
-        - Implementar con múltiples queries
-        - Considerar desnormalización para jerarquías muy profundas
+    Obtiene las subcategorías de una categoría padre dada de forma asíncrona.
     """
-    return db.query(Category).filter(Category.parent_id == parent_id).offset(skip).limit(limit).all()
+    result = await db.execute(select(Category).filter(Category.parent_id == parent_id))
+    return result.scalars().all()
 
 
-def get_category_and_all_children_ids(db: Session, category_id: int) -> List[int]:
+async def get_category_and_all_children_ids(db: AsyncSession, category_id: int) -> List[int]:
     """
-    Obtiene el ID de la categoría dada y los IDs de toda su descendencia.
-
-    Utiliza una consulta recursiva (CTE - Common Table Expression) para
-    recorrer eficientemente la jerarquía de categorías.
-
-    Args:
-        db: Sesión de SQLAlchemy
-        category_id: ID de la categoría raíz desde la que empezar a buscar.
-
-    Returns:
-        Una lista de IDs de categoría, incluyendo la original y todas sus hijas.
+    Obtiene el ID de la categoría dada y los IDs de toda su descendencia de forma asíncrona.
+    Utiliza una consulta recursiva (CTE) para recorrer la jerarquía.
     """
-    from sqlalchemy import text
-
-    # Consulta CTE recursiva para obtener la jerarquía de categorías
-    # Esta es una forma estándar y eficiente de manejar jerarquías en SQL.
-    cte = db.query(Category.category_id).filter(Category.category_id == category_id).cte(name='category_cte', recursive=True)
+    category_cte = select(Category.category_id).filter(Category.category_id == category_id).cte(name='category_cte', recursive=True)
     
-    # Parte recursiva de la CTE
-    cte = cte.union_all(
-        db.query(Category.category_id).join(cte, Category.parent_id == cte.c.category_id)
-    )
+    recursive_part = select(Category.category_id).join(category_cte, Category.parent_id == category_cte.c.category_id)
     
-    # Seleccionar todos los IDs de la CTE
-    result = db.query(cte.c.category_id).all()
+    full_cte = category_cte.union_all(recursive_part)
     
-    # El resultado es una lista de tuplas, lo aplanamos a una lista de enteros
-    return [r[0] for r in result]
+    result = await db.execute(select(full_cte.c.category_id))
+    
+    return [r[0] for r in result.fetchall()]
 
 
 # ========================================
 # OPERACIONES DE ESCRITURA (CREATE, UPDATE, DELETE)
 # ========================================
 
-def create_category(db: Session, category: category_schema.CategoryCreate) -> Category:
+async def create_category(db: AsyncSession, category: category_schema.CategoryCreate) -> Category:
     """
     Crea una nueva categoría en la base de datos.
     
@@ -241,12 +188,12 @@ def create_category(db: Session, category: category_schema.CategoryCreate) -> Ca
         parent_id=category.parent_id
     )
     db.add(db_category)
-    db.commit()  # Persiste en la base de datos
-    db.refresh(db_category)  # Recarga el objeto con datos actualizados de la BD
+    await db.commit()  # Persiste en la base de datos
+    await db.refresh(db_category)  # Recarga el objeto con datos actualizados de la BD
     return db_category
 
 
-def update_category(db: Session, category_id: int, category_update: category_schema.CategoryUpdate) -> Optional[Category]:
+async def update_category(db: AsyncSession, category_id: int, category_update: category_schema.CategoryUpdate) -> Optional[Category]:
     """
     Actualiza una categoría existente.
     
@@ -278,7 +225,7 @@ def update_category(db: Session, category_id: int, category_update: category_sch
         if updated:
             print(f"Categoría actualizada: {updated.name}")
     """
-    db_category = get_category(db, category_id=category_id)
+    db_category = await get_category(db, category_id=category_id)
     if not db_category:
         return None
     
@@ -288,12 +235,12 @@ def update_category(db: Session, category_id: int, category_update: category_sch
         setattr(db_category, key, value)
     
     db.add(db_category)  # Marca el objeto como modificado
-    db.commit()  # Persiste los cambios
-    db.refresh(db_category)  # Recarga datos actualizados
+    await db.commit()  # Persiste los cambios
+    await db.refresh(db_category)  # Recarga datos actualizados
     return db_category
 
 
-def delete_category(db: Session, category_id: int) -> Optional[Category]:
+async def delete_category(db: AsyncSession, category_id: int) -> Optional[Category]:
     """
     Elimina una categoría de la base de datos.
     
@@ -334,10 +281,10 @@ def delete_category(db: Session, category_id: int) -> Optional[Category]:
             
             deleted = delete_category(db, category_id)
     """
-    db_category = get_category(db, category_id)
+    db_category = await get_category(db, category_id)
     if db_category:
-        db.delete(db_category)
-        db.commit()
+        await db.delete(db_category)
+        await db.commit()
     return db_category
 
 # ========================================
@@ -357,7 +304,7 @@ def delete_category(db: Session, category_id: int) -> Optional[Category]:
 #     """Cuenta productos en una categoría, opcionalmente incluyendo subcategorías."""
 #     pass
 
-def get_total_categories(db: Session) -> int:
+async def get_total_categories(db: AsyncSession) -> int:
     """
     Obtiene el número total de categorías en la base de datos.
     
@@ -366,4 +313,5 @@ def get_total_categories(db: Session) -> int:
     Returns:
         Número total de categorías (int)
     """
-    return db.query(Category).count()
+    result = await db.execute(select(func.count(Category.category_id)))
+    return result.scalar_one()

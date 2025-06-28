@@ -256,32 +256,16 @@ class ProductService:
             pass # Temporalmente silenciar para la Fase 1
 
     async def search_products(
-        self, 
-        db: Session,
-        query_text: str, 
-        top_k: int = 10, 
-        category_filter: Optional[int] = None
-    ) -> dict:
-        """
-        Realiza una búsqueda de productos.
-        MODIFICACIÓN TEMPORAL: Usa una búsqueda SQL LIKE en lugar de Qdrant para diagnóstico.
-        """
-        try:
-            logger.info(f"Ejecutando búsqueda simple por texto para: '{query_text}'")
-            
-            # Usamos el product_crud que ya tiene una función de búsqueda por nombre
-            products = product_crud.get_products(db, name_like=query_text, limit=top_k)
-            
-            logger.info(f"Búsqueda simple encontró {len(products)} productos.")
-
-            return {
-                "products": products,
-                "message": f"Found {len(products)} products using simple text search."
-            }
-
-        except Exception as e:
-            logger.error(f"Error durante la búsqueda simple de productos: {e}", exc_info=True)
-            return {"products": [], "message": f"An error occurred: {e}"}
+        self, db: Session, query_text: str, top_k: int = 5
+    ) -> Dict[str, Any]:
+        # Esta implementación es un placeholder. En un caso real, aquí se generaría
+        # un embedding del query_text y se usaría para buscar en Qdrant.
+        # Por ahora, simplemente buscamos por texto en la base de datos.
+        
+        # Simulamos una búsqueda que podría ser semántica en el futuro
+        products = await product_crud.search_products_by_term(db, search_term=query_text, top_k=top_k)
+        
+        return {"query": query_text, "products": products}
 
     # ========================================
     # GESTIÓN DE EMBEDDINGS (para Qdrant)

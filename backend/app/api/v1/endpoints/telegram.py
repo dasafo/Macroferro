@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.api.deps import get_db
 from app.schemas.telegram_schema import TelegramUpdate
 from app.services.telegram_service import TelegramBotService
+from app.db.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,7 @@ router = APIRouter()
 @router.post("/webhook")
 async def telegram_webhook(
     request: Request,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    background_tasks: BackgroundTasks
 ):
     """
     Webhook para recibir actualizaciones de Telegram.
@@ -77,7 +77,6 @@ async def telegram_webhook(
             process_and_respond_multiple,
             update_data,
             telegram_service,
-            db,
             background_tasks
         )
         logger.info(f"Update de Telegram agregado a la cola de procesamiento.")
@@ -93,12 +92,12 @@ async def telegram_webhook(
 async def process_and_respond_multiple(
     update_data: dict, 
     bot_service: TelegramBotService, 
-    db: Session,
     background_tasks: BackgroundTasks
 ):
     """
     Procesa el update del usuario, obtiene una respuesta estructurada del servicio
     y se encarga de enviarla al chat correspondiente.
+    Esta función gestiona su propia sesión de base de datos.
     """
     chat_id = None
     try:
@@ -112,43 +111,45 @@ async def process_and_respond_multiple(
 
         logger.info(f"Procesando update para chat {chat_id}...")
         
-        # 1. Obtener la respuesta estructurada del servicio
-        response_data = await bot_service.process_message(db, update_data, background_tasks)
-        
-        if not response_data:
-            logger.info(f"El servicio determinó que no se necesita respuesta para el update del chat {chat_id}.")
-            return
-
-        # 2. Enviar la respuesta según su tipo
-        response_type = response_data.get("type")
-        
-        if response_type == "product_with_image":
-            await bot_service.send_product_with_image(
-                chat_id=chat_id,
-                product=response_data.get("product"),
-                caption=response_data.get("caption", ""),
-                additional_messages=response_data.get("additional_messages", []),
-                reply_markup=response_data.get("reply_markup")
-            )
-        elif response_type == "text_messages":
-            messages = response_data.get("messages", [])
-            if not messages:
+        # Crear una nueva sesión de BD para esta tarea en background
+        async with AsyncSessionLocal() as db:
+            # 1. Obtener la respuesta estructurada del servicio
+            response_data = await bot_service.process_message(db, update_data, background_tasks)
+            
+            if not response_data:
+                logger.info(f"El servicio determinó que no se necesita respuesta para el update del chat {chat_id}.")
                 return
 
-            # El teclado solo se adjunta al primer mensaje de una secuencia
-            first_message = messages[0]
-            other_messages = messages[1:]
+            # 2. Enviar la respuesta según su tipo
+            response_type = response_data.get("type")
             
-            await bot_service.send_message(
-                chat_id,
-                first_message,
-                reply_markup=response_data.get("reply_markup")
-            )
-            if other_messages:
-                await bot_service.send_multiple_messages(chat_id, other_messages)
-        
-        else:
-            logger.warning(f"Tipo de respuesta no reconocido del servicio: '{response_type}' para chat {chat_id}")
+            if response_type == "product_with_image":
+                await bot_service.send_product_with_image(
+                    chat_id=chat_id,
+                    product=response_data.get("product"),
+                    caption=response_data.get("caption", ""),
+                    additional_messages=response_data.get("additional_messages", []),
+                    reply_markup=response_data.get("reply_markup")
+                )
+            elif response_type == "text_messages":
+                messages = response_data.get("messages", [])
+                if not messages:
+                    return
+
+                # El teclado solo se adjunta al primer mensaje de una secuencia
+                first_message = messages[0]
+                other_messages = messages[1:]
+                
+                await bot_service.send_message(
+                    chat_id,
+                    first_message,
+                    reply_markup=response_data.get("reply_markup")
+                )
+                if other_messages:
+                    await bot_service.send_multiple_messages(chat_id, other_messages)
+            
+            else:
+                logger.warning(f"Tipo de respuesta no reconocido del servicio: '{response_type}' para chat {chat_id}")
 
     except Exception as e:
         logger.error(f"Error crítico en process_and_respond_multiple para chat {chat_id}: {e}", exc_info=True)

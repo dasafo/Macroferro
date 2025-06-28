@@ -19,11 +19,21 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Macroferro API"
     PROJECT_VERSION: str = "0.1.0"
 
-    # Base de datos PostgreSQL - Del .env
-    DATABASE_URL: str
+    # Configuración de la base de datos
+    POSTGRES_SERVER: str = os.getenv("POSTGRES_SERVER", "postgres")
+    POSTGRES_USER: str = os.getenv("POSTGRES_USER", "user")
+    POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "password")
+    POSTGRES_DB: str = os.getenv("POSTGRES_DB", "macroferro_db")
+    POSTGRES_PORT: str = os.getenv("POSTGRES_PORT", "5432")
+    
+    @property
+    def DATABASE_URL(self) -> str:
+        """URL de conexión a la base de datos asíncrona."""
+        return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
-    # Redis - Default seguro
-    REDIS_HOST: str = "redis"
+    # Configuración de Redis
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", 6379))
 
     # Qdrant - Combinado: algunos del .env, otros defaults
     QDRANT_HOST: str = "localhost"

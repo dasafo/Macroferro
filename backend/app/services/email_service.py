@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.services.google_drive_service import google_drive_service
 from app.services.csv_writer_service import csv_writer_service
 from app.crud import order_crud
-from app.api.deps import get_db
+from app.db.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -176,9 +176,10 @@ async def send_invoice_email(
             
             # Actualizar la URL del PDF en la base de datos
             try:
-                db = next(get_db())
-                order_crud.update_order_pdf_url(db, order_id=order_data.get('id'), pdf_url=drive_link)
-                logger.info(f"URL del PDF para el pedido {order_data.get('id')} actualizada en la base de datos.")
+                # Usar un context manager para asegurar que la sesión se cierre
+                async with AsyncSessionLocal() as db:
+                    await order_crud.update_order_pdf_url(db, order_id=order_data.get('id'), pdf_url=drive_link)
+                    logger.info(f"URL del PDF para el pedido {order_data.get('id')} actualizada en la base de datos.")
             except Exception as db_error:
                 logger.error(f"Error al actualizar la URL del PDF en la BBDD para el pedido {order_data.get('id')}: {db_error}")
             

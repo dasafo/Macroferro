@@ -13,7 +13,7 @@ import logging
 import json
 import re
 from typing import Dict, Any, List, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 
 from app.core.config import settings
@@ -22,7 +22,7 @@ from app.services.context_service import context_service
 from app.crud.product_crud import get_product_by_sku
 from app.crud.conversation_crud import get_recent_products, add_recent_product, get_user_context, update_user_context
 from app.api.deps import get_db
-from app.crud import category_crud
+from app.crud import category_crud, product_crud
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class ProductHandler:
         self.product_service = product_service
         self.openai_client = openai_client
 
-    async def handle_intent(self, db: Session, intent_type: str, analysis: Dict, message_text: str, chat_id: int) -> Dict[str, Any]:
+    async def handle_intent(self, db: AsyncSession, intent_type: str, analysis: Dict, message_text: str, chat_id: int) -> Dict[str, Any]:
         """
         Punto de entrada principal para gestionar intenciones relacionadas con productos.
         Delega a métodos específicos según la intención detectada por la IA.
@@ -56,7 +56,7 @@ class ProductHandler:
         is_repetition = analysis.get("is_repetition", False)
 
         # Lógica de desambiguación: ¿La búsqueda es por una categoría?
-        all_categories = category_crud.get_categories(db, limit=1000) # Obtener todas las categorías
+        all_categories = await category_crud.get_categories(db, limit=1000) # Obtener todas las categorías
         
         matched_category = None
         for cat in all_categories:
@@ -90,12 +90,12 @@ class ProductHandler:
                 sku = await self._resolve_product_reference(message_text, chat_id)
 
             if sku:
-                product = get_product_by_sku(db, sku)
+                product = await get_product_by_sku(db, sku)
                 if product:
                     product_data = product.to_dict() # Convertir a dict
                     await add_recent_product(chat_id, product_data)
                     caption = self._format_product_details(product)
-                    suggestions = await context_service.get_contextual_suggestions(chat_id)
+                    suggestions = await context_service.get_contextual_suggestions(chat_id, db)
                     return {
                         "type": "product_with_image",
                         "product": product,
@@ -113,18 +113,18 @@ class ProductHandler:
         # 4. Consulta de catálogo general
         if intent_type == "catalog_inquiry":
             logger.info("Manejando 'catalog_inquiry'.")
-            return self._handle_catalog_inquiry(db)
+            return await self._handle_catalog_inquiry(db)
 
         # 5. Fallback para intenciones no manejadas
         logger.warning(f"Intención no manejada por ProductHandler: {intent_type}. Respondiendo genéricamente.")
-        return self._handle_catalog_inquiry(db)
+        return await self._handle_catalog_inquiry(db)
 
 
-    def get_main_categories_formatted(self, db: Session) -> str:
+    async def get_main_categories_formatted(self, db: AsyncSession) -> str:
         """
         Obtiene las categorías principales de la base de datos y las formatea en un string.
         """
-        main_categories = category_crud.get_root_categories(db)
+        main_categories = await category_crud.get_root_categories(db)
         if not main_categories:
             return ""
         
@@ -132,11 +132,11 @@ class ProductHandler:
         response_text += "\n".join([f"• {cat.name}" for cat in main_categories])
         return response_text
     
-    def _handle_catalog_inquiry(self, db: Session) -> Dict[str, Any]:
+    async def _handle_catalog_inquiry(self, db: AsyncSession) -> Dict[str, Any]:
         """
         Gestiona la consulta del catálogo de productos, mostrando las categorías principales.
         """
-        categories_text = self.get_main_categories_formatted(db)
+        categories_text = await self.get_main_categories_formatted(db)
         
         return {
             "type": "text_messages",
@@ -146,15 +146,14 @@ class ProductHandler:
             ]
         }
     
-    async def _handle_category_search(self, db: Session, chat_id: int, category: Any, is_repetition: bool = False) -> Dict[str, Any]:
+    async def _handle_category_search(self, db: AsyncSession, chat_id: int, category: Any, is_repetition: bool = False) -> Dict[str, Any]:
         """
         Realiza una búsqueda de productos filtrando por una categoría específica.
         """
         logger.info(f"Buscando productos para la categoría: '{category.name}'")
         
         # Usamos el product_crud directamente para buscar por category_id
-        from app.crud import product_crud
-        products = product_crud.get_products(db, category_id=category.category_id, limit=10)
+        products = await product_crud.get_products(db, category_id=category.category_id, limit=10)
         
         # Guardar los productos encontrados en el contexto reciente del chat
         product_dicts = [p.to_dict() for p in products]
@@ -177,7 +176,7 @@ class ProductHandler:
         for i, p in enumerate(products, 1):
             response_text += f"*{i}. {p.name}* ({p.sku})\n"
         
-        suggestions = await context_service.get_contextual_suggestions(chat_id)
+        suggestions = await context_service.get_contextual_suggestions(chat_id, db)
         response_text += f"\n{suggestions}"
         
         return {
@@ -185,7 +184,7 @@ class ProductHandler:
             "messages": [response_text]
         }
         
-    async def _handle_product_search(self, db: Session, chat_id: int, search_terms: List[str], is_repetition: bool = False) -> Dict[str, Any]:
+    async def _handle_product_search(self, db: AsyncSession, chat_id: int, search_terms: List[str], is_repetition: bool = False) -> Dict[str, Any]:
         """
         Realiza una búsqueda de productos y formatea la respuesta.
         """
@@ -221,7 +220,7 @@ class ProductHandler:
         if len(products) == 1:
             product = products[0]
             caption = self._format_product_details(product)
-            suggestions = await context_service.get_contextual_suggestions(chat_id)
+            suggestions = await context_service.get_contextual_suggestions(chat_id, db)
             return {
                 "type": "product_with_image",
                 "product": product,
@@ -236,7 +235,7 @@ class ProductHandler:
             for i, p in enumerate(products, 1):
                 response_text += f"*{i}. {p.name}* ({p.sku})\n"
             
-            suggestions = await context_service.get_contextual_suggestions(chat_id)
+            suggestions = await context_service.get_contextual_suggestions(chat_id, db)
             response_text += f"\n{suggestions}"
             
             return {
@@ -244,175 +243,147 @@ class ProductHandler:
                 "messages": [response_text]
             }
     
-    async def _handle_technical_question(self, db: Session, chat_id: int, analysis: Dict, question: str) -> Dict[str, Any]:
+    async def _handle_technical_question(self, db: AsyncSession, chat_id: int, analysis: Dict, question: str) -> Dict[str, Any]:
         """
         Responde a una pregunta técnica sobre un producto usando IA y el contexto.
         """
-        product_reference = analysis.get("specific_product_mentioned", "el producto")
+        sku_reference = analysis.get("specific_product_mentioned")
         
-        # Primero, intenta resolver la referencia a un producto concreto
-        sku = await self._resolve_product_reference(product_reference, chat_id)
-        if not sku:
-            return {"type": "text_messages", "messages": [f"No estoy seguro de a qué producto te refieres con '{product_reference}'. ¿Podrías ser más específico?"]}
-            
-        # El producto debería estar en el contexto reciente, no necesitamos ir a la BD
-        context = await get_user_context(chat_id)
-        product_data = next((p for p in context.get("recent_products", []) if p.get("sku") == sku), None)
+        # Resolver la referencia a un producto específico (SKU)
+        if sku_reference and re.match(r'SKU\d{5}', sku_reference.strip(), re.IGNORECASE):
+            sku = sku_reference.strip().upper()
+        else:
+            sku = await self._resolve_product_reference(question, chat_id)
 
-        if not product_data:
-            return {"type": "text_messages", "messages": [f"No encontré los detalles del producto con SKU {sku} en el contexto reciente."]}
-            
-        # Ahora, con el producto, consulta a OpenAI
-        if not self.openai_client:
-            return {"type": "text_messages", "messages": ["Lo siento, la función de análisis técnico no está disponible en este momento."]}
-            
-        prompt = f"""
-        Eres un experto técnico de Macroferro. Un cliente pregunta sobre el producto '{product_data.get('name')}' (SKU: {product_data.get('sku')}).
-        Descripción del producto: {product_data.get('description')}
-        Características: {product_data.get('spec_json')}
+        if not sku:
+            return {
+                "type": "text_messages",
+                "messages": ["No estoy seguro de a qué producto te refieres. ¿Puedes ser más específico?"]
+            }
+
+        product = await get_product_by_sku(db, sku)
+        if not product:
+            return {
+                "type": "text_messages",
+                "messages": ["No pude encontrar los detalles para ese producto. Intenta buscarlo de nuevo."]
+            }
+
+        # Guardar en contexto reciente
+        await add_recent_product(chat_id, product.to_dict())
+
+        # Usar OpenAI para responder la pregunta técnica
+        logger.info(f"Usando OpenAI para responder pregunta técnica sobre el producto {sku}.")
         
-        Pregunta del cliente: "{question}"
+        # Crear el prompt para la IA
+        system_prompt = (
+            "Eres un asistente técnico experto de la ferretería Macroferro. "
+            "Tu única tarea es responder preguntas técnicas sobre un producto específico usando la información proporcionada. "
+            "Sé conciso y directo. Si la información no está disponible, indícalo claramente."
+        )
         
-        Basándote en la información que tienes, responde a la pregunta de forma clara y concisa. Si no tienes la respuesta, indícalo amablemente.
-        """
-        
+        user_prompt = (
+            f"Producto: {product.name} (SKU: {product.sku})\n"
+            f"Descripción: {product.description}\n"
+            f"Especificaciones: {json.dumps(product.spec_json, indent=2)}\n\n"
+            f"Pregunta del cliente: '{question}'"
+        )
+
         try:
             response = await self.openai_client.chat.completions.create(
-                model="gpt-4-turbo",
-                messages=[{"role": "system", "content": prompt}],
+                model=settings.OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
                 temperature=0.2,
-                max_tokens=250
+                max_tokens=200
             )
             answer = response.choices[0].message.content
             
-            suggestions = await context_service.get_contextual_suggestions(chat_id)
-            return {"type": "text_messages", "messages": [answer, suggestions]}
+            # Formateo de la respuesta
+            formatted_answer = f"Sobre el *{product.name}*:\n\n{answer}"
             
+            return {
+                "type": "text_messages",
+                "messages": [formatted_answer]
+            }
         except Exception as e:
-            logger.error(f"Error consultando a OpenAI para pregunta técnica: {e}")
-            return {"type": "text_messages", "messages": ["Lo siento, tuve un problema al generar la respuesta técnica."]}
+            logger.error(f"Error llamando a la API de OpenAI: {e}")
+            return {
+                "type": "text_messages",
+                "messages": ["Lo siento, no pude procesar la pregunta técnica en este momento."]
+            }
 
     def _format_product_details(self, product) -> str:
         """
-        Formatea los detalles de un solo producto para una presentación clara.
+        Formatea los detalles de un producto en un string legible para el usuario.
         """
         price_str = f"{product.price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        
-        details = (
-            f"*{product.name}*\n"
-            f"`SKU: {product.sku}`\n\n"
-            f"{product.description}\n\n"
-            f"Brand: {product.brand if product.brand else 'N/A'}\n"
-            f"Categoría: {product.category.name if product.category else 'N/A'}\n"
-            f"*Precio: {price_str} €*\n"
-        )
+        details = f"📦 *{product.name}*\n"
+        details += f"🔖 SKU: `{product.sku}`\n"
+        details += f"🔩 Marca: {product.brand}\n"
+        details += f"💰 Precio: ${price_str}\n\n"
+        if product.description:
+            details += f"📝 *Descripción:*\n{product.description}\n\n"
         
         if product.spec_json:
-            features = "\n".join([f"• *{key.replace('_', ' ').capitalize()}:* {value}" for key, value in product.spec_json.items()])
-            if features:
-                details += f"\n*Características:*\n{features}"
-            
-        return details
-
-    async def _resolve_product_reference(self, reference: str, chat_id: int, action_context: str = None) -> Optional[str]:
-        """
-        Resuelve una referencia textual a un producto (ej: "ese martillo", "el número 2")
-        basándose en el contexto de la conversación.
-        """
-        reference_lower = reference.lower()
-        context = await get_user_context(chat_id)
+            details += "📋 *Especificaciones técnicas:*\n"
+            for key, value in product.spec_json.items():
+                details += f"• {key.replace('_', ' ').capitalize()}: {value}\n"
         
-        # Unificar todas las listas de productos relevantes en una sola para la búsqueda
-        # Damos prioridad a los productos del carrito
-        product_pool = []
-        product_skus_in_pool = set()
+        return details.strip()
 
-        # 1. Añadir productos del carrito
-        cart_data = context.get("cart", {})
-        cart_items = cart_data.get("items", {})
-        if cart_items:
-            for item in cart_items.values():
-                if item.get("product") and item["product"].get("sku") not in product_skus_in_pool:
-                    product_pool.append(item["product"])
-                    product_skus_in_pool.add(item["product"]["sku"])
+    async def _resolve_product_reference(self, reference: str, chat_id: int) -> Optional[str]:
+        """
+        Resuelve una referencia en lenguaje natural a un SKU de producto, basándose en el
+        contexto reciente. Prioriza referencias numéricas/ordinales y luego por keyword.
 
-        # 2. Añadir productos recientes (que no estén ya en el pool desde el carrito)
-        recent_products = context.get("recent_products", [])
-        if recent_products:
-            for product in recent_products:
-                if product.get("sku") not in product_skus_in_pool:
-                    product_pool.append(product)
-                    product_skus_in_pool.add(product["sku"])
+        Returns:
+            El SKU del producto resuelto, o None si no se puede resolver.
+        """
+        logger.info(f"Resolviendo referencia: '{reference}' para el chat {chat_id}")
         
-        # Si no hay productos en el contexto, no podemos resolver nada
-        if not product_pool:
+        user_context = await get_user_context(chat_id)
+        recent_products = user_context.get("recent_products", [])
+        
+        if not recent_products:
+            logger.warning(f"No hay productos recientes en el contexto para resolver la referencia '{reference}'")
             return None
 
-        # --- INICIO DE LÓGICA DE RESOLUCIÓN ---
-        
-        # Caso A: Referencia numérica (ej: "el 2", "número 3")
-        # Esto debe usar la lista de productos recientes en el orden en que se vieron
-        match = re.search(r'(?:del|el|número|la)\s+(\d+)', reference_lower)
+        # Estrategia 1: Búsqueda por ordinales numéricos (ej: "el 2", "dame el 5to")
+        # Busca un número aislado, opcionalmente precedido por palabras y/o artículos.
+        match = re.search(r'(?:el|la|del|dame|ponme|número|producto|#)\s*(\d+)', reference, re.IGNORECASE)
+        if not match:
+             # Fallback para casos como "el 6" o "el 5" donde no hay espacio
+            match = re.search(r'\b(\d+)\b', reference)
+
         if match:
             try:
-                index = int(match.group(1)) - 1
-                
-                # Para referencias numéricas, usamos SÓLO los productos recientes en orden inverso
-                ordered_recent = list(recent_products)
-                ordered_recent.reverse()
-
-                if 0 <= index < len(ordered_recent):
-                    sku = ordered_recent[index].get("sku")
-                    logger.info(f"Referencia numérica '{reference}' resuelta a SKU {sku} del historial.")
+                index = int(match.group(1)) - 1  # Convertir a índice base 0
+                if 0 <= index < len(recent_products):
+                    sku = recent_products[index]['sku']
+                    logger.info(f"Referencia '{reference}' resuelta por ordinal numérico a SKU: {sku}")
                     return sku
             except (ValueError, IndexError):
-                logger.warning(f"No se pudo resolver la referencia numérica: '{reference}'")
-                # No retornamos None, permitimos que caiga a la búsqueda por texto
+                pass # El número encontrado no es un índice válido
 
-        # Caso B: Referencia directa al último producto visto (ej: "este", "esa", "el último")
-        demonstratives = ["este", "esta", "ese", "esa", "eso", "el último", "la última"]
-        if any(word in demonstratives for word in reference_lower.split()):
-            if recent_products:
-                sku = recent_products[0].get("sku")
-                logger.info(f"Referencia demostrativa '{reference}' resuelta al último SKU visto: {sku}.")
-                return sku
+        # Estrategia 2: Búsqueda por ordinales de texto ("el primero", "el último")
+        ordinal_map = {"primero": 0, "segundo": 1, "tercero": 2, "cuarto": 3, "quinto": 4, "último": -1}
+        for word, index in ordinal_map.items():
+            if word in reference.lower():
+                # Asegurarnos de que el índice sea válido para la lista actual de productos
+                if -len(recent_products) <= index < len(recent_products):
+                    sku = recent_products[index]['sku']
+                    logger.info(f"Referencia '{reference}' resuelta por ordinal de texto a SKU: {sku}")
+                    return sku
         
-        # Caso C: Búsqueda por coincidencia de texto en todo el pool de productos
-        return self._search_reference_in_product_list(reference, product_pool)
+        # Estrategia 3: Búsqueda por palabras clave en nombre, marca o SKU (como fallback)
+        for product in recent_products:
+            if reference.lower() in product.get('name', '').lower() or \
+               reference.lower() in product.get('brand', '').lower() or \
+               reference.lower() == product.get('sku', '').lower():
+                logger.info(f"Referencia '{reference}' resuelta por keyword a SKU: {product['sku']}")
+                return product['sku']
 
-    def _search_reference_in_product_list(self, reference: str, product_list: List[Any]) -> Optional[str]:
-        """Busca la referencia en una lista de productos y devuelve el SKU del mejor match."""
-        if not product_list:
-            return None
-
-        best_match_score = 0
-        best_match_sku = None
-        
-        reference_words = set(re.findall(r'\b\w+\b', reference.lower()))
-        
-        for product in product_list:
-            # Esta función puede recibir objetos de producto (de la BD) o dicts (del carrito).
-            # Hay que manejar ambos casos.
-            is_dict = isinstance(product, dict)
-            name = product.get('name', '') if is_dict else getattr(product, 'name', '')
-            description = product.get('description', '') if is_dict else getattr(product, 'description', '')
-            sku = product.get('sku') if is_dict else getattr(product, 'sku', None)
-            
-            if not sku:
-                continue
-
-            product_text = f"{name} {description}".lower()
-            product_words = set(re.findall(r'\b\w+\b', product_text))
-            
-            score = len(reference_words.intersection(product_words))
-            
-            if score > best_match_score:
-                best_match_score = score
-                best_match_sku = sku
-
-        if best_match_sku:
-            logger.info(f"Referencia '{reference}' resuelta a SKU {best_match_sku} con puntuación {best_match_score}.")
-        else:
-            logger.warning(f"No se pudo encontrar un match para la referencia '{reference}'.")
-            
-        return best_match_sku
+        logger.warning(f"No se pudo resolver la referencia '{reference}' con las estrategias actuales.")
+        return None

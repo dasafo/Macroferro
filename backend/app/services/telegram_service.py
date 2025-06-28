@@ -13,7 +13,7 @@ import json
 from typing import Optional, Dict, Any, List, Tuple
 import httpx
 from openai import AsyncOpenAI
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 import re
 from fastapi import BackgroundTasks
 
@@ -82,7 +82,7 @@ class TelegramBotService:
     # PROCESAMIENTO PRINCIPAL DE MENSAJES
     # ========================================
     
-    async def process_message(self, db: Session, message_data: Dict[str, Any], background_tasks: BackgroundTasks) -> Dict[str, Any]:
+    async def process_message(self, db: AsyncSession, message_data: Dict[str, Any], background_tasks: BackgroundTasks) -> Dict[str, Any]:
         """
         Procesa un mensaje entrante, orquestando análisis de IA y respuestas.
         """
@@ -148,7 +148,7 @@ class TelegramBotService:
         await add_turn_to_history(chat_id, user_message, error_text)
         return response_dict
         
-    async def _handle_command(self, db: Session, chat_id: int, message_text: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_command(self, db: AsyncSession, chat_id: int, message_text: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Maneja los comandos que empiezan con '/'."""
         parts = message_text.split()
         command = parts[0]
@@ -169,7 +169,7 @@ class TelegramBotService:
         else:
             return {"type": "text_messages", "messages": [f"😕 No reconozco el comando '{command}'. Escribe /help para ver la lista de comandos disponibles."]}
 
-    async def _handle_natural_language(self, db: Session, chat_id: int, message_text: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_natural_language(self, db: AsyncSession, chat_id: int, message_text: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Maneja mensajes en lenguaje natural usando IA."""
         logger.info(f"Analizando mensaje de chat {chat_id}: '{message_text}'")
 
@@ -210,12 +210,12 @@ class TelegramBotService:
     # RESPUESTAS Y FORMATO
     # ========================================
             
-    async def _handle_conversational_response(self, db: Session, message_text: str) -> Dict[str, Any]:
+    async def _handle_conversational_response(self, db: AsyncSession, message_text: str) -> Dict[str, Any]:
         """Maneja respuestas conversacionales generales con personalidad de vendedor experto."""
         messages = []
         if any(g in message_text.lower() for g in ['hola', 'buenos', 'buenas']):
             
-            categories_text = self.product_handler.get_main_categories_formatted(db)
+            categories_text = await self.product_handler.get_main_categories_formatted(db)
             
             messages = [
                 "¡Hola! 👋 Soy el asistente técnico de Macroferro.",
@@ -353,6 +353,22 @@ class TelegramBotService:
             else:
                 logger.error(f"Error configurando webhook: {result}")
             return result
+
+    async def _handle_callback_query(self, db: AsyncSession, callback_query: Dict[str, Any]) -> Dict[str, Any]:
+        """Maneja las pulsaciones de botones inline."""
+        chat_id = callback_query['message']['chat']['id']
+        data = callback_query['data']
+        
+        # Aquí puedes añadir lógica para diferentes tipos de callbacks
+        # Por ahora, un ejemplo simple
+        if data.startswith("category_"):
+            category_id = int(data.split('_')[1])
+            # Lógica para mostrar productos de esa categoría...
+            # Esta es una implementación de ejemplo
+            response_text = f"Has seleccionado una categoría. ID: {category_id}. ¡Próximamente más funciones!"
+            await self.send_message(chat_id, response_text)
+
+        return {"status": "ok"}
 
 # ========================================
 # INSTANCIA SINGLETON DEL SERVICIO

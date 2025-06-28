@@ -8,9 +8,12 @@ pagar hasta que el pedido se confirma.
 import logging
 from typing import Dict, Any, Tuple, Optional
 import json
+import re
 
 from fastapi import BackgroundTasks
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.services.email_service import send_invoice_email
@@ -19,7 +22,7 @@ from app.crud import client_crud, order_crud
 from app.crud.conversation_crud import get_user_context, set_pending_action, clear_user_context
 from app.schemas import order_schema
 from app.db.models.client_model import Client
-from app.db.models.order_model import Order
+from app.db.models.order_model import Order, OrderItem
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +40,7 @@ class CheckoutHandler:
         """
         self.cart_handler = cart_handler
 
-    async def start_checkout(self, db: Session, chat_id: int) -> Dict[str, Any]:
+    async def start_checkout(self, db: AsyncSession, chat_id: int) -> Dict[str, Any]:
         """
         Inicia el flujo de checkout, mostrando el resumen del carrito y la primera pregunta.
         """
@@ -70,7 +73,7 @@ class CheckoutHandler:
             return True
         return False
 
-    async def process_step(self, db: Session, chat_id: int, message_text: str, current_action: str, action_data: Dict[str, Any], background_tasks: BackgroundTasks) -> Optional[Dict[str, Any]]:
+    async def process_step(self, db: AsyncSession, chat_id: int, message_text: str, current_action: str, action_data: Dict[str, Any], background_tasks: BackgroundTasks) -> Optional[Dict[str, Any]]:
         """
         Procesa la recolección de datos del cliente paso a paso.
         """
@@ -88,7 +91,7 @@ class CheckoutHandler:
 
         elif current_action == "checkout_get_recurrent_email":
             email = user_response
-            client = client_crud.get_client_by_email(db, email)
+            client = await client_crud.get_client_by_email(db, email)
             if client:
                 action_data = {"name": client.name, "email": client.email, "phone": client.phone, "address": client.address}
                 await set_pending_action(chat_id, "checkout_confirm_recurrent_data", action_data)
@@ -110,23 +113,38 @@ class CheckoutHandler:
             return {"type": "text_messages", "messages": [f"✅ Perfecto, *{action_data['name']}*.\n\n📧 Ahora envíame tu *correo electrónico*:"]}
 
         elif current_action == "checkout_collect_email":
+            # Validación simple de email usando regex
+            email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if not re.match(email_regex, user_response):
+                return {"type": "text_messages", "messages": ["❌ El formato del correo electrónico no parece válido. Por favor, inténtalo de nuevo (ej: `usuario@dominio.com`)."]}
+            
             action_data["email"] = user_response
             await set_pending_action(chat_id, "checkout_collect_phone", action_data)
             return {"type": "text_messages", "messages": [f"✅ Email guardado.\n\n📱 Ahora envíame tu *número de teléfono*:"]}
         
         elif current_action == "checkout_collect_phone":
+            # Validación de teléfono: al menos 9 dígitos, permitiendo espacios opcionales
+            phone_cleaned = re.sub(r'\s+', '', message_text.strip())
+            if not (phone_cleaned.isdigit() and len(phone_cleaned) >= 9):
+                 return {"type": "text_messages", "messages": ["❌ El número de teléfono no parece válido. Por favor, introduce un número de al menos 9 dígitos."]}
+
             action_data["phone"] = message_text.strip()
             await set_pending_action(chat_id, "checkout_collect_address", action_data)
             return {"type": "text_messages", "messages": [f"✅ Teléfono guardado.\n\n🏠 Por último, envíame tu *dirección de envío completa*:"]}
 
         elif current_action == "checkout_collect_address":
-            action_data["address"] = message_text.strip()
+            # Validación de dirección: no vacía y con una longitud mínima
+            address = message_text.strip()
+            if len(address) < 10:
+                return {"type": "text_messages", "messages": ["❌ La dirección parece demasiado corta. Por favor, introduce una dirección de envío completa."]}
+
+            action_data["address"] = address
             return await self._finalize_checkout(db, chat_id, action_data, background_tasks)
 
         logger.warning(f"Se alcanzó un estado de checkout no manejado: {current_action}")
         return {"type": "text_messages", "messages": ["❌ Error en el proceso de recolección de datos."]}
 
-    async def _finalize_checkout(self, db: Session, chat_id: int, customer_data: Dict[str, Any], background_tasks: BackgroundTasks) -> Dict[str, Any]:
+    async def _finalize_checkout(self, db: AsyncSession, chat_id: int, customer_data: Dict[str, Any], background_tasks: BackgroundTasks) -> Dict[str, Any]:
         """
         Finaliza la compra: crea pedido, limpia carrito, envía emails, y notifica al usuario.
         """
@@ -151,19 +169,20 @@ class CheckoutHandler:
             logger.error(f"Error inesperado en checkout final para chat {chat_id}: {e}", exc_info=True)
             return {"type": "text_messages", "messages": ["❌ Ocurrió un error inesperado al procesar tu pedido."]}
 
-    async def _get_or_create_client_and_order(self, db: Session, chat_id: int, cart_data: Dict, client_details: Dict) -> Tuple[Client, Order]:
+    async def _get_or_create_client_and_order(self, db: AsyncSession, chat_id: int, cart_data: Dict, client_details: Dict) -> Tuple[Client, Order]:
         """
         Localiza o crea un cliente y luego crea un pedido a partir de los datos del carrito.
         """
-        client = client_crud.get_client_by_email(db, email=client_details["email"])
+        client = await client_crud.get_client_by_email(db, email=client_details["email"])
         if not client:
-            client = client_crud.create_client(db, name=client_details["name"], email=client_details["email"], phone=client_details.get("phone"), address=client_details.get("address"))
+            client = await client_crud.create_client(db, name=client_details["name"], email=client_details["email"], phone=client_details.get("phone"), address=client_details.get("address"))
         else:
+            # Actualizar datos si el cliente ya existía
             client.name = client_details["name"]
             client.phone = client_details.get("phone", client.phone)
             client.address = client_details.get("address", client.address)
-            db.commit()
-            db.refresh(client)
+            await db.commit()
+            await db.refresh(client)
         
         order_items = [
             order_schema.OrderItemCreate(product_sku=sku, quantity=item["quantity"], price=item["product"]["price"])
@@ -180,5 +199,14 @@ class CheckoutHandler:
             items=order_items
         )
         
-        order = order_crud.create_order(db, order=order_to_create)
-        return client, order 
+        order = await order_crud.create_order(db, order=order_to_create)
+
+        # Volver a cargar el pedido pero esta vez con los items para evitar lazy loading en el background task
+        result = await db.execute(
+            select(Order).filter(Order.order_id == order.order_id).options(
+                joinedload(Order.items).joinedload(OrderItem.product)
+            )
+        )
+        order_with_items = result.unique().scalars().one()
+        
+        return client, order_with_items 

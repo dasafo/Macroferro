@@ -10,12 +10,13 @@ interacción del usuario con el carrito de compras. Se encarga de:
 import logging
 import json
 from typing import Dict, Any, List
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.services.context_service import context_service
 from app.services.bot_components.product_handler import ProductHandler
 from app.crud.conversation_crud import get_user_context, update_user_context, add_recent_product
+from app.crud.product_crud import get_product_by_sku
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class CartHandler:
         """
         self.product_handler = product_handler
 
-    async def handle_action(self, db: Session, analysis: Dict, chat_id: int) -> Dict[str, Any]:
+    async def handle_action(self, db: AsyncSession, analysis: Dict, chat_id: int) -> Dict[str, Any]:
         """
         Punto de entrada principal para gestionar una acción de carrito detectada por la IA.
         Delega a métodos específicos según la acción.
@@ -70,7 +71,7 @@ class CartHandler:
         # Devolvemos la respuesta de la última acción, que contiene el estado final del carrito
         return final_response
 
-    async def add_item_by_command(self, db: Session, chat_id: int, args: List[str]) -> Dict[str, Any]:
+    async def add_item_by_command(self, db: AsyncSession, chat_id: int, args: List[str]) -> Dict[str, Any]:
         """Maneja el comando /agregar <SKU> [cantidad]."""
         if not args:
             return {"type": "text_messages", "messages": ["Uso: /agregar <SKU> [cantidad]"]}
@@ -85,7 +86,7 @@ class CartHandler:
 
         return await self._add_item_to_cart(db, chat_id, sku, quantity)
 
-    async def natural_add_to_cart(self, db: Session, action_details: Dict, chat_id: int) -> Dict[str, Any]:
+    async def natural_add_to_cart(self, db: AsyncSession, action_details: Dict, chat_id: int) -> Dict[str, Any]:
         """Maneja añadir al carrito desde lenguaje natural."""
         product_reference = action_details.get("product_reference", "")
         quantity = action_details.get("quantity", 1)
@@ -93,24 +94,25 @@ class CartHandler:
         if not product_reference:
             return {"type": "text_messages", "messages": ["🤔 No pude identificar qué producto quieres agregar. ¿Podrías ser más específico?"]}
         
-        sku = await self.product_handler._resolve_product_reference(product_reference, chat_id, action_context='add')
+        sku = await self.product_handler._resolve_product_reference(product_reference, chat_id)
         
         if not sku:
             return {"type": "text_messages", "messages": [f"🤔 No pude identificar un producto para '{product_reference}'. ¿Podrías ser más específico o usar el SKU?"]}
             
         return await self._add_item_to_cart(db, chat_id, sku, quantity)
 
-    async def _add_item_to_cart(self, db: Session, chat_id: int, sku: str, quantity: int) -> Dict[str, Any]:
+    async def _add_item_to_cart(self, db: AsyncSession, chat_id: int, sku: str, quantity: int) -> Dict[str, Any]:
         """Lógica central para añadir un item al carrito y devolver la confirmación."""
         
-        # Obtenemos el producto del contexto reciente, no de la API
-        context = await get_user_context(chat_id)
-        product_data = next((p for p in context.get("recent_products", []) if p.get("sku") == sku), None)
+        product = await get_product_by_sku(db, sku)
 
-        if not product_data:
-            return {"type": "text_messages", "messages": [f"😕 No se encontró ningún producto con el SKU: {sku} en tu contexto reciente. Intenta buscarlo primero."]}
+        if not product:
+            return {"type": "text_messages", "messages": [f"😕 No se encontró ningún producto con el SKU: {sku}."]}
+
+        product_data = product.to_dict()
 
         # Lógica de carrito directamente en el contexto
+        context = await get_user_context(chat_id)
         cart = context.get("cart", {"items": {}, "total_price": 0.0})
         
         current_quantity = cart["items"].get(sku, {}).get("quantity", 0)
@@ -130,7 +132,7 @@ class CartHandler:
         product_name = product_data.get('name', sku)
         message = f"✅ *¡Añadido!* {quantity} x {product_name}" if quantity > 0 else f"➖ *¡Reducido!* Se quitaron {-quantity} x {product_name}"
         
-        return await self._create_cart_confirmation_response(chat_id, initial_message=f"{message}\n\n")
+        return await self._create_cart_confirmation_response(chat_id, db, initial_message=f"{message}\n\n")
 
     async def view_cart(self, chat_id: int) -> Dict[str, Any]:
         """Maneja la visualización del carrito."""
@@ -142,7 +144,7 @@ class CartHandler:
         
         return await self._create_cart_confirmation_response(chat_id)
 
-    async def remove_item_by_command(self, db: Session, chat_id: int, args: List[str]) -> Dict[str, Any]:
+    async def remove_item_by_command(self, db: AsyncSession, chat_id: int, args: List[str]) -> Dict[str, Any]:
         """Maneja el comando /eliminar <SKU> [cantidad]."""
         if not args:
             return {"type": "text_messages", "messages": ["Uso: /eliminar <SKU> [cantidad]. Si no especificas cantidad, se elimina el producto completo."]}
@@ -159,7 +161,7 @@ class CartHandler:
         else:
             return await self._remove_item_from_cart(chat_id, sku)
 
-    async def natural_remove_from_cart(self, db: Session, action_details: Dict, chat_id: int) -> Dict[str, Any]:
+    async def natural_remove_from_cart(self, db: AsyncSession, action_details: Dict, chat_id: int) -> Dict[str, Any]:
         """Maneja quitar del carrito desde lenguaje natural."""
         product_reference = action_details.get("product_reference", "")
         quantity_to_remove = action_details.get("quantity")
@@ -167,7 +169,7 @@ class CartHandler:
         if not product_reference:
             return {"type": "text_messages", "messages": ["🤔 No pude identificar qué producto quieres quitar."]}
             
-        sku = await self.product_handler._resolve_product_reference(product_reference, chat_id, action_context='remove')
+        sku = await self.product_handler._resolve_product_reference(product_reference, chat_id)
         if not sku:
             return {"type": "text_messages", "messages": [f"🤔 No pude identificar '{product_reference}' en tu carrito."]}
         
@@ -214,14 +216,12 @@ class CartHandler:
         response_text += f"\n*Total: {total_str} €*"
         return response_text
 
-    async def _create_cart_confirmation_response(self, chat_id: int, initial_message: str = "") -> Dict[str, Any]:
+    async def _create_cart_confirmation_response(self, chat_id: int, db: AsyncSession, initial_message: str = "") -> Dict[str, Any]:
         """Crea una respuesta estándar post-actualización de carrito, incluyendo sugerencias."""
         context = await get_user_context(chat_id)
         cart_content = self._format_cart_data(context.get("cart", {}))
         
-        # Las sugerencias ahora podrían venir del contexto o de un servicio que lo use
-        # Por ahora lo dejamos simple.
-        suggestions = "Puedes seguir buscando, ver detalles de otro producto o finalizar la compra."
+        suggestions = await context_service.get_contextual_suggestions(chat_id, db)
         final_message = f"{initial_message}{cart_content}\n\n{suggestions}"
         
         return {"type": "text_messages", "messages": [final_message]} 

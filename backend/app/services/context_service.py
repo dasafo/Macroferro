@@ -4,13 +4,13 @@ Servicio para gestionar la lógica de contexto y fluidez de la conversación.
 Este módulo se encarga de analizar el estado actual de la conversación
 para proporcionar sugerencias proactivas y mejorar la naturalidad del bot.
 """
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any
 from app.crud import conversation_crud as crud
 
 class ContextService:
 
-    async def get_contextual_suggestions(self, chat_id: int) -> str:
+    async def get_contextual_suggestions(self, chat_id: int, db: AsyncSession) -> str:
         """
         Genera una cadena de texto con sugerencias contextuales basadas en las últimas acciones.
         """
