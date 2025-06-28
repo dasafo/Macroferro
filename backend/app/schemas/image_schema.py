@@ -1,17 +1,10 @@
+# backend/app/schemas/image_schema.py
 """
 Esquemas Pydantic para el modelo Image.
 
-Los esquemas definen la estructura de datos que fluye a través de la API:
-- Validación automática de tipos de datos
-- Serialización/deserialización JSON
-- Documentación automática en OpenAPI/Swagger
-- Separación entre modelo de base de datos y API
+Este archivo contiene los esquemas Pydantic para el modelo Image.
 
-Patrón de esquemas utilizado:
-- ImageBase: Propiedades comunes compartidas
-- ImageCreate: Para crear nuevas imágenes (POST)
-- ImageUpdate: Para actualizar imágenes existentes (PUT/PATCH)
-- ImageResponse: Para respuestas de la API (GET)
+Se encarga de definir los esquemas Pydantic para el modelo Image.
 """
 
 from typing import Optional

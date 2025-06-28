@@ -1,3 +1,12 @@
+# backend/app/crud/stock_crud.py
+"""
+Este archivo contiene las operaciones CRUD para el modelo Stock.
+
+Operaciones CRUD para el modelo Stock.
+
+Este módulo proporciona funciones para consultar y actualizar el stock de productos en diferentes almacenes.
+"""
+
 from typing import List
 from sqlalchemy.orm import Session
 from sqlalchemy import func, select

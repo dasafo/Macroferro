@@ -1,5 +1,4 @@
 # backend/app/schemas/category_schema.py
-
 """
 Esquemas Pydantic para el modelo Category.
 
@@ -8,12 +7,6 @@ Los esquemas definen la estructura de datos que fluye a través de la API:
 - Serialización/deserialización JSON
 - Documentación automática en OpenAPI/Swagger
 - Separación entre modelo de base de datos y API
-
-Patrón de esquemas utilizado:
-- CategoryBase: Propiedades comunes compartidas
-- CategoryCreate: Para crear nuevas categorías (POST)
-- CategoryUpdate: Para actualizar categorías existentes (PUT/PATCH)
-- CategoryResponse: Para respuestas de la API (GET)
 """
 
 from typing import Optional, List

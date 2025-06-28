@@ -1,3 +1,12 @@
+# backend/app/services/email_service.py
+"""
+Servicio de Envío de Correo para la aplicación.
+
+Este servicio se encarga de enviar correos electrónicos a los usuarios,
+especialmente para la generación y envío de facturas. Utiliza la biblioteca
+FastMail para enviar correos y WeasyPrint para generar PDFs.
+"""
+
 from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
 from pydantic import EmailStr
 from typing import List, Dict, Any

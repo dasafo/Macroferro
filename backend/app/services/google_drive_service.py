@@ -1,3 +1,11 @@
+# backend/app/services/google_drive_service.py
+"""
+Servicio de Google Drive para la aplicación.
+
+Este servicio se encarga de gestionar la conexión y operaciones con Google Drive,
+especialmente para la subida y descarga de archivos PDF.
+"""
+
 import os
 import logging
 from google.oauth2 import service_account

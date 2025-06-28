@@ -1,5 +1,4 @@
 # backend/app/main.py
-
 """
 Punto de entrada principal de la aplicación FastAPI.
 
@@ -7,26 +6,11 @@ Este módulo configura y inicializa la aplicación FastAPI completa,
 incluyendo la configuración de rutas, middleware, documentación automática,
 y eventos del ciclo de vida de la aplicación.
 
-Responsabilidades del módulo principal:
-- Creación e inicialización de la instancia FastAPI
-- Configuración de metadatos de la aplicación (título, versión, descripción)
-- Registro de routers de la API con sus prefijos correspondientes
-- Configuración de la documentación automática (OpenAPI/Swagger)
-- Definición de endpoints raíz para verificación de estado
-- Preparación para eventos de ciclo de vida (startup/shutdown)
-
-Arquitectura de la aplicación:
-- Application Factory: Configuración centralizada de la app
-- Modular Routing: Separación de endpoints por versión y funcionalidad
-- Configuration-Driven: Usa settings del módulo core.config
-- API Versioning: Preparado para múltiples versiones de la API
-- Auto-Documentation: Swagger UI y ReDoc automáticos
-
-Patrones implementados:
-- Factory Pattern: Creación configurada de la instancia FastAPI
-- Router Registration: Inclusión modular de routers por dominio
-- Environment Configuration: Configuración via variables de entorno
-- Health Check: Endpoint simple para verificación de estado
+Características principales:
+- Configuración centralizada de la aplicación
+- Registro de routers de la API con prefijos
+- Documentación automática (OpenAPI/Swagger)
+- Eventos del ciclo de vida de la aplicación (startup/shutdown)
 """
 
 from fastapi import FastAPI

@@ -1,27 +1,28 @@
-fastapi[all]
-uvicorn[standard]
-psycopg2-binary==2.9.9
-redis==5.0.1
-qdrant-client>=1.7.0
-openai>=1.0.0
-sqlalchemy
-pydantic[email]
-pydantic-settings
-python-dotenv
-passlib[bcrypt]
-python-multipart
-aiohttp>=3.8.0
-httpx>=0.26.0
-python-jose[cryptography]
-tenacity
-fastapi-mail
-weasyprint
+fastapi[all] # FastAPI framework
+uvicorn[standard] # ASGI server
+psycopg2-binary==2.9.9 # PostgreSQL driver
+redis==5.0.1 # Redis client
+qdrant-client>=1.7.0 # Qdrant client
+openai>=1.0.0 # OpenAI API client
+sqlalchemy # ORM
 
-# Dependencias para Google Drive API
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
+pydantic[email] # Data validation and settings management using python type annotations
+pydantic-settings # Pydantic settings management using python type annotations
+python-dotenv # Load environment variables from .env file
+passlib[bcrypt] # Password hashing algorithms
+python-multipart # Multipart/form-data parsing
+aiohttp>=3.8.0 # Asynchronous HTTP client/server for asyncio and Python
+httpx>=0.26.0 # HTTP client for asyncio and Python
+python-jose[cryptography] # JSON Web Signature and JSON Web Token implementation
+tenacity # Retry logic for asyncio and Python
+fastapi-mail # Email sending with FastAPI
+weasyprint # HTML to PDF conversion
 
-SQLAlchemy==2.0.25
-alembic==1.13.1
-asyncpg==0.29.0
+# Dependencies for Google Drive API
+google-api-python-client # Google Drive API client
+google-auth-httplib2 # Google Drive API client
+google-auth-oauthlib # Google Drive API client
+
+SQLAlchemy==2.0.25 # ORM
+alembic==1.13.1 # Migrations
+asyncpg==0.29.0 # PostgreSQL driver

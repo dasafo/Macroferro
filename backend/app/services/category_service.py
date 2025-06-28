@@ -1,30 +1,10 @@
 # backend/app/services/category_service.py
-
 """
-Capa de servicios para operaciones de negocio relacionadas con categorías.
+Servicio para operaciones de negocio relacionadas con categorías.
 
-Esta capa implementa el patrón Service Layer, proporcionando una abstracción
-entre los endpoints de la API y las operaciones CRUD de base de datos. Su
-responsabilidad principal es manejar la lógica de negocio compleja, validaciones
-y orquestación de múltiples operaciones CRUD.
-
-Responsabilidades de la capa de servicio:
-- Validaciones de negocio complejas (duplicados, integridad referencial)
-- Orquestación de múltiples operaciones CRUD
-- Manejo de reglas de negocio específicas del dominio
-- Transformaciones de datos entre diferentes representaciones
-- Logging y auditoría de operaciones críticas
-- Manejo centralizado de excepciones de negocio
-
-Patrón de diseño implementado:
-- Service Layer: Encapsula lógica de negocio
-- Dependency Injection: Recibe Session de SQLAlchemy como parámetro
-- Single Responsibility: Cada método tiene una responsabilidad específica
-- Composición: Utiliza operaciones CRUD como building blocks
-
-Diferencias con la capa CRUD:
-- CRUD: Operaciones atómicas de base de datos
-- Service: Lógica de negocio y validaciones complejas
+Este servicio se encarga de gestionar la lógica de negocio para el manejo de categorías,
+incluyendo validaciones complejas, verificación de integridad referencial
+y orquestación de operaciones que involucran múltiples entidades.
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession

@@ -1,13 +1,11 @@
+# backend/app/services/bot_components/product_handler.py
 """
-Handler de Productos para el Bot de Telegram.
+Servicio de Productos para el Bot de Telegram.
 
 Este componente encapsula toda la lógica de negocio relacionada con la
 interacción del usuario con los productos del catálogo. Se encarga de:
 - Interpretar y ejecutar búsquedas de productos.
 - Gestionar consultas sobre el catálogo general.
-- Proporcionar detalles específicos de un producto.
-- Responder a preguntas técnicas usando IA.
-- Resolver referencias ambiguas a productos (ej: "ese de ahí", "el segundo").
 """
 import logging
 import json

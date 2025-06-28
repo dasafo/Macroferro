@@ -1,3 +1,15 @@
+# backend/app/api/v1/endpoints/cart.py
+"""
+Este archivo contiene los endpoints para el carrito de compras.
+
+Endpoints para el carrito de compras.
+
+Este archivo contiene los endpoints para el carrito de compras.
+
+Se encarga de gestionar las operaciones de agregar productos, eliminar productos,
+obtener el contenido del carrito y procesar el checkout.
+"""
+
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from typing import List

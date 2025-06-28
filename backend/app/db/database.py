@@ -1,5 +1,4 @@
 # backend/app/db/database.py
-
 """
 Configuración principal de la base de datos para la aplicación.
 
@@ -8,9 +7,6 @@ los componentes básicos que serán utilizados por toda la aplicación:
 - Motor de base de datos (engine)
 - Fábrica de sesiones (SessionLocal)  
 - Clase base para modelos (Base)
-
-La función get_db() se ha movido a app/api/deps.py para seguir las mejores
-prácticas de FastAPI y mantener las dependencias separadas de la configuración.
 """
 
 from typing import AsyncGenerator

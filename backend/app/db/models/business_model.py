@@ -1,4 +1,14 @@
-# backend/app/db/models/business.py
+# backend/app/db/models/business_model.py
+"""
+Este archivo contiene los modelos de negocio para la aplicación.
+
+Modelos de negocio para la aplicación.
+
+Este archivo contiene los modelos de negocio para la aplicación.
+
+Se encarga de definir los modelos de negocio para la aplicación.
+"""
+
 from sqlalchemy import Column, Integer, String, ForeignKey, Text, Numeric, DateTime, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func

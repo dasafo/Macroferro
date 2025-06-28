@@ -1,33 +1,17 @@
 # backend/app/services/product_service.py
-
 """
-Capa de servicios para operaciones de negocio relacionadas con productos.
+Servicio para operaciones de negocio relacionadas con productos.
 
-Esta capa implementa el patrón Service Layer para el dominio de productos,
-proporcionando una abstracción de alto nivel que orquesta operaciones CRUD
-complejas, maneja validaciones de negocio y coordina interacciones entre
-productos, categorías e imágenes.
+Este servicio se encarga de gestionar la lógica de negocio para el manejo de productos,
+incluyendo validaciones complejas, gestión de relaciones con categorías e imágenes,
+y orquestación de operaciones que afectan múltiples entidades.
 
-Responsabilidades principales:
-- Validaciones de negocio complejas (SKU únicos, relaciones válidas)
-- Orquestación de operaciones multi-entidad (productos + imágenes)
-- Gestión de relaciones many-to-many con imágenes
-- Validación de especificaciones técnicas (JSON)
-- Aplicación de reglas de negocio específicas del catálogo
-- Manejo de errores de integridad referencial
-
-Características del dominio de productos:
-- SKU como identificador único inmutable
-- Relaciones opcionales con categorías
-- Asociaciones múltiples con imágenes
-- Especificaciones técnicas flexibles (JSONB)
-- Integración con sistema de inventario y facturación
-
-Patrones implementados:
-- Service Layer: Lógica de negocio centralizada
-- Composition: Utiliza múltiples repositorios CRUD
-- Validation Layer: Validaciones complejas de dominio
-- Error Handling: Manejo específico de excepciones de negocio
+Características principales:
+- Validación de SKUs únicos y formato
+- Gestión de relaciones opcionales con categorías
+- Coordinación de asociaciones producto-imagen
+- Validación de especificaciones técnicas JSON
+- Aplicación de reglas de negocio del catálogo
 """
 
 from sqlalchemy.orm import Session

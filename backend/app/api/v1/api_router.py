@@ -1,7 +1,12 @@
 # backend/app/api/v1/api_router.py
-
 """
+Este archivo contiene el router principal para la API versión 1.
+
 Router principal para la API versión 1.
+
+Este archivo contiene el router principal para la API versión 1.
+
+Se encarga de registrar y configurar todos los routers de la versión 1 de la API.
 """
 
 from fastapi import APIRouter

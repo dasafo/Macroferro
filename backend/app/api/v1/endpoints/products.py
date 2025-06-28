@@ -1,7 +1,12 @@
 # backend/app/api/v1/endpoints/products.py
-
 """
-Endpoints REST para operaciones CRUD y búsqueda de productos.
+Este archivo contiene los endpoints para la gestión de productos.
+
+Endpoints para la gestión de productos.
+
+Este archivo contiene los endpoints para la gestión de productos.
+
+Se encarga de gestionar las operaciones de creación, actualización, eliminación y lectura de productos.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query

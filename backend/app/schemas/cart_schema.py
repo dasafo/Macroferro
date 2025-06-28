@@ -1,5 +1,12 @@
+# backend/app/schemas/cart_schema.py
 """
 Esquemas Pydantic para la gestión del carrito de la compra.
+
+Esquemas Pydantic para la gestión del carrito de la compra.
+
+Este archivo contiene los esquemas Pydantic para la gestión del carrito de la compra.
+
+Se encarga de definir los esquemas Pydantic para la gestión del carrito de la compra.
 """
 
 from pydantic import BaseModel

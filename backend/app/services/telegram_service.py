@@ -1,10 +1,17 @@
+# backend/app/services/telegram_service.py
 """
-Capa de servicios para operaciones de negocio del Bot de Telegram.
+Servicio de Bot de Telegram para la aplicación.
 
-Esta capa implementa el patrón Service Layer para la integración con Telegram Bot API,
-proporcionando una abstracción de alto nivel que orquesta la comunicación bidireccional
-con usuarios de Telegram, procesamiento inteligente de mensajes con IA, y búsqueda
-avanzada de productos en el catálogo de Macroferro.
+Este servicio se encarga de gestionar la comunicación con el Bot de Telegram,
+incluyendo procesamiento de mensajes, manejo de comandos, búsqueda de productos,
+y envío de respuestas. Utiliza la API de Telegram Bot para interactuar con el usuario.
+
+Características principales:
+- Procesamiento de mensajes de texto y comandos
+- Búsqueda de productos y envío de respuestas
+- Gestión de carrito de compras
+- Integración con API de Telegram
+- Manejo de errores y excepciones
 """
 
 import asyncio

@@ -1,19 +1,10 @@
 # backend/app/schemas/product.py
-
 """
 Esquemas Pydantic para el modelo Product.
 
-Este módulo define los esquemas para manejar productos en la API, incluyendo:
-- Validación de datos de entrada y salida
-- Manejo de relaciones anidadas (categorías, imágenes)
-- Validación y parseado de JSON para especificaciones técnicas
-- Integración con modelos SQLAlchemy mediante from_attributes
+Este archivo contiene los esquemas Pydantic para el modelo Product.
 
-Los productos son el núcleo del catálogo, con relaciones complejas hacia:
-- Categorías (many-to-one)
-- Imágenes (many-to-many)
-- Stock (one-to-many)
-- Items de factura (one-to-many)
+Se encarga de definir los esquemas Pydantic para el modelo Product.
 """
 
 from typing import Optional, List, Any, Dict

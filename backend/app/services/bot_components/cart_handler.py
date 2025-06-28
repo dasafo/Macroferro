@@ -1,3 +1,4 @@
+# backend/app/services/bot_components/cart_handler.py
 """
 Handler del Carrito para el Bot de Telegram.
 
@@ -5,7 +6,6 @@ Este componente encapsula toda la lógica de negocio relacionada con la
 interacción del usuario con el carrito de compras. Se encarga de:
 - Interpretar y ejecutar acciones de carrito (añadir, quitar, ver, etc.).
 - Formatear las respuestas del carrito.
-- Interactuar con la API del carrito de compras.
 """
 import logging
 import json

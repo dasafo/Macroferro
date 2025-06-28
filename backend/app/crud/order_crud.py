@@ -1,3 +1,12 @@
+# backend/app/crud/order_crud.py
+"""
+Este archivo contiene las operaciones CRUD para el modelo Order.
+
+Operaciones CRUD para el modelo Order.
+
+Este módulo proporciona funciones para crear y gestionar pedidos, incluyendo la generación de IDs de pedido, actualización de estados y gestión de detalles de pedido.
+"""
+
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from sqlalchemy import func, case, select

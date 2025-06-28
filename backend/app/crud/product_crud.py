@@ -1,24 +1,8 @@
 # backend/app/crud/product_crud.py
-
 """
 Operaciones CRUD para el modelo Product.
 
-Este módulo implementa las operaciones de Create, Read, Update, Delete para productos,
-siendo el corazón del sistema de catálogo. Maneja relaciones complejas con categorías,
-imágenes, stock e ítems de factura.
-
-Funcionalidades principales:
-- Consultas optimizadas con eager loading para evitar N+1 queries
-- Filtrado avanzado por múltiples criterios (precio, marca, categoría, nombre)
-- Gestión de asociaciones many-to-many con imágenes
-- Manejo de especificaciones técnicas en formato JSON
-- Validaciones de integridad referencial
-
-Estrategias de optimización implementadas:
-- selectinload() para cargar relaciones de manera eficiente
-- Filtros combinables para búsquedas flexibles
-- Paginación para manejo de catálogos grandes
-- Lazy loading controlado según el contexto de uso
+Este módulo proporciona funciones para consultar y actualizar el stock de productos en diferentes almacenes.
 """
 
 from sqlalchemy.orm import Session, joinedload, subqueryload,selectinload

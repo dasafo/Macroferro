@@ -1,7 +1,13 @@
-# backend/app/db/models/product.py
-from sqlalchemy import Column, Integer, String, ForeignKey, Text, Numeric, UniqueConstraint
-from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import JSONB
+# backend/app/db/models/product_model.py
+"""
+Este archivo contiene el modelo de producto para la aplicación.
+
+Modelos de producto para la aplicación.
+
+Este archivo contiene los modelos de producto para la aplicación.
+
+Se encarga de definir los modelos de producto para la aplicación.
+"""
 
 from app.db.database import Base
 

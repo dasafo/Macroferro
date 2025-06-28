@@ -1,5 +1,6 @@
+# backend/app/services/bot_components/checkout_handler.py
 """
-Handler del Flujo de Checkout para el Bot de Telegram.
+Servicio de Checkout para el Bot de Telegram.
 
 Este componente encapsula la máquina de estados y la lógica de negocio
 para el proceso de finalización de compra, desde que el usuario decide

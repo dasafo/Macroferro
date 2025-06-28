@@ -1,7 +1,15 @@
+# backend/app/db/models/stock_model.py  
+"""
+Este archivo contiene el modelo de stock para la aplicación.
+
+Modelos de stock para la aplicación.
+
+Este archivo contiene los modelos de stock para la aplicación.
+"""
+
 from sqlalchemy import Column, Integer, String, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.db.database import Base
-
 class Warehouse(Base):
     __tablename__ = "warehouses"
 

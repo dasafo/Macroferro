@@ -1,3 +1,9 @@
+# backend/app/services/cart_service.py
+"""
+Servicio de Carrito de Compras para la aplicación.
+
+Este servicio se encarga de gestionar el carrito de compras de un usuario en memoria.
+"""
 import json
 from typing import Dict, Optional
 

@@ -1,5 +1,12 @@
+# backend/app/api/v1/endpoints/categories.py
 """
-Endpoints REST para operaciones CRUD de categorías.
+Este archivo contiene los endpoints para la gestión de categorías.
+
+Endpoints para la gestión de categorías.
+
+Este archivo contiene los endpoints para la gestión de categorías.
+
+Se encarga de gestionar las operaciones de creación, actualización, eliminación y lectura de categorías.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status

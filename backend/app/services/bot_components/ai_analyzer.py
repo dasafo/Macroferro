@@ -1,9 +1,11 @@
+# backend/app/services/bot_components/ai_analyzer.py
 """
 Servicio de Análisis de IA para el Bot de Telegram.
 
 Este componente se especializa en interactuar con la API de OpenAI
 para analizar el texto del usuario y determinar su intención.
 """
+
 import logging
 import json
 import re

@@ -1,3 +1,4 @@
+# backend/app/schemas/telegram_schema.py
 """
 Esquemas Pydantic para el manejo de la API de Telegram Bot.
 
@@ -9,7 +10,6 @@ Documentación de referencia: https://core.telegram.org/bots/api#available-types
 
 from pydantic import BaseModel, Field
 from typing import Optional
-
 class TelegramUser(BaseModel):
     """Representa un usuario de Telegram."""
     id: int

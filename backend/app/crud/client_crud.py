@@ -1,3 +1,12 @@
+# backend/app/crud/client_crud.py
+"""
+Este archivo contiene las operaciones CRUD para el modelo Client.
+
+Operaciones CRUD para el modelo Client.
+
+Este módulo proporciona funciones para crear y buscar clientes en la base de datos.
+"""
+
 from sqlalchemy.orm import Session
 from sqlalchemy import func, cast, Integer, select
 from sqlalchemy.sql.functions import max as sql_max

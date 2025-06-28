@@ -1,3 +1,14 @@
+# backend/app/api/v1/endpoints/telegram.py
+"""
+Este archivo contiene los endpoints para la gestión de Telegram.
+
+Endpoints para la gestión de Telegram.
+
+Este archivo contiene los endpoints para la gestión de Telegram.
+
+Se encarga de gestionar las operaciones de procesamiento de mensajes entrantes de Telegram.
+"""
+
 import logging
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
