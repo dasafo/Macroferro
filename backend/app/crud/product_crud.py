@@ -226,29 +226,3 @@ async def get_product_images(db: AsyncSession, sku: str) -> List[Image]:
     db_product = product.scalar_one_or_none()
     return db_product.images if db_product else []
 
-
-# ========================================
-# FUNCIONES AUXILIARES Y FUTURAS EXTENSIONES
-# ========================================
-
-# Funciones utilitarias que se podrían añadir en el futuro:
-
-# def get_products_by_category_hierarchy(db: Session, category_id: int, include_subcategories: bool = True) -> List[Product]:
-#     """Obtiene productos de una categoría y opcionalmente sus subcategorías."""
-#     pass
-
-# def search_products_full_text(db: Session, search_term: str, limit: int = 50) -> List[Product]:
-#     """Búsqueda full-text en nombre, descripción y especificaciones."""
-#     pass
-
-# def get_products_low_stock(db: Session, threshold: int = 10) -> List[Product]:
-#     """Obtiene productos con stock bajo el umbral especificado."""
-#     pass
-
-# def get_product_stock_summary(db: Session, sku: str) -> Dict[str, Any]:
-#     """Obtiene resumen de stock por almacén para un producto."""
-#     pass
-
-# def bulk_update_prices(db: Session, price_updates: List[Dict[str, Any]]) -> int:
-#     """Actualización masiva de precios para múltiples productos."""
-#     pass

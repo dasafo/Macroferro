@@ -1,4 +1,4 @@
-# backend/app/schemas/category.py
+# backend/app/schemas/category_schema.py
 
 """
 Esquemas Pydantic para el modelo Category.
@@ -24,15 +24,9 @@ from pydantic import BaseModel, ConfigDict
 # ========================================
 
 class CategoryBase(BaseModel):
-    """
-    Esquema base que contiene las propiedades comunes de una categoría.
-    
-    Este esquema sirve como base para otros esquemas, implementando el principio DRY.
-    Contiene solo los campos que son compartidos entre operaciones de creación,
-    actualización y respuesta.
-    """
-    name: str  # Nombre de la categoría (requerido en todas las operaciones)
-    parent_id: Optional[int] = None  # ID de la categoría padre (None para categorías raíz)
+    """Propiedades comunes compartidas entre esquemas de categoría."""
+    name: str
+    parent_id: Optional[int] = None
 
 
 # ========================================
@@ -40,40 +34,14 @@ class CategoryBase(BaseModel):
 # ========================================
 
 class CategoryCreate(CategoryBase):
-    """
-    Esquema para crear una nueva categoría.
-    
-    Usado en endpoints POST. Incluye el category_id porque en este proyecto
-    las categorías se cargan desde un CSV que ya proporciona IDs específicos,
-    en lugar de usar auto-incremento.
-    
-    Ejemplo de uso:
-    POST /api/v1/categories/
-    {
-        "category_id": 1,
-        "name": "Herramientas",
-        "parent_id": null
-    }
-    """
-    category_id: int  # El category_id se proporciona en el CSV, así que lo incluimos en la creación
+    """Esquema para crear una nueva categoría. El ID se provee externamente."""
+    category_id: int
 
 
 class CategoryUpdate(CategoryBase):
-    """
-    Esquema para actualizar una categoría existente.
-    
-    Usado en endpoints PUT/PATCH. Todos los campos son opcionales para permitir
-    actualizaciones parciales. El category_id no se puede cambiar (se pasa en la URL).
-    
-    Ejemplo de uso:
-    PATCH /api/v1/categories/1
-    {
-        "name": "Herramientas Eléctricas"  # Solo actualizar el nombre
-    }
-    """
-    name: Optional[str] = None  # Todos los campos son opcionales en la actualización
+    """Esquema para actualizar una categoría. Todos los campos son opcionales."""
+    name: Optional[str] = None
     parent_id: Optional[int] = None
-    # No permitimos cambiar el category_id (se identifica por la URL del endpoint)
 
 
 # ========================================
@@ -81,30 +49,13 @@ class CategoryUpdate(CategoryBase):
 # ========================================
 
 class CategoryResponse(CategoryBase):
-    """
-    Esquema para las respuestas de la API al leer categorías.
+    """Esquema para las respuestas de la API al leer categorías."""
+    category_id: int
     
-    Usado en endpoints GET. Incluye todos los campos que se devuelven al cliente,
-    incluyendo el category_id que se genera/lee desde la base de datos.
-    
-    La configuración from_attributes=True permite que Pydantic convierta automáticamente
-    objetos SQLAlchemy a JSON, facilitando la integración entre el ORM y la API.
-    
-    Ejemplo de respuesta:
-    GET /api/v1/categories/1
-    {
-        "category_id": 1,
-        "name": "Herramientas",
-        "parent_id": null
-    }
-    """
-    category_id: int  # ID único de la categoría (viene de la base de datos)
-    
-    # Extensión futura: categorías anidadas
-    # Si quisiéramos incluir las subcategorías directamente en la respuesta:
-    # children: List["CategoryResponse"] = []  # Requiere forward reference y from_attributes
+    # Para incluir subcategorías anidadas en el futuro:
+    # children: List["CategoryResponse"] = []
 
-    model_config = ConfigDict(from_attributes=True)  # Permite que Pydantic lea datos directamente desde modelos SQLAlchemy
+    model_config = ConfigDict(from_attributes=True)
 
 # ========================================
 # RESOLUCIÓN DE REFERENCIAS FUTURAS

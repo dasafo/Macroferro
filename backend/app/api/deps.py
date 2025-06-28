@@ -24,31 +24,3 @@ def get_settings():
     Dependencia de FastAPI para obtener el objeto de configuración.
     """
     return settings
-
-# ========================================
-# DEPENDENCIAS FUTURAS
-# ========================================
-# Este módulo crecerá con dependencias adicionales según las necesidades del proyecto:
-
-# Ejemplo de dependencia de autenticación (para implementar en fases posteriores):
-# def get_current_user(token: str = Depends(oauth2_scheme)) -> models.User:
-#     """
-#     Extrae y valida el usuario actual desde el token JWT.
-#     """
-#     # Lógica de validación de token y extracción de usuario
-#     pass
-
-# Ejemplo de dependencia de autorización:
-# def get_admin_user(current_user: models.User = Depends(get_current_user)) -> models.User:
-#     """
-#     Verifica que el usuario actual tenga permisos de administrador.
-#     """
-#     # Lógica de verificación de permisos
-#     pass
-
-# Ejemplo de dependencia de paginación:
-# def common_parameters(q: Optional[str] = None, skip: int = 0, limit: int = 100):
-#     """
-#     Parámetros comunes para endpoints con paginación y búsqueda.
-#     """
-#     return {"q": q, "skip": skip, "limit": limit}

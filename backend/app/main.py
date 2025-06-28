@@ -55,10 +55,6 @@ app = FastAPI(
 # Esto permite tener múltiples versiones de la API sin conflictos
 app.include_router(api_router_v1, prefix=settings.API_V1_STR)
 
-# EXTENSIÓN FUTURA: Registro de routers adicionales
-# app.include_router(api_router_v2, prefix="/api/v2")  # Para versión 2 de la API
-# app.include_router(admin_router, prefix="/admin")     # Para endpoints administrativos
-# app.include_router(auth_router, prefix="/auth")       # Para autenticación y autorización
 
 # ========================================
 # ENDPOINTS RAÍZ Y VERIFICACIÓN DE ESTADO
@@ -143,67 +139,3 @@ async def startup_event():
     except Exception as e:
         print(f"❌ Error durante la inicialización del webhook: {e}")
         # No detener la aplicación si falla la configuración del webhook
-
-# EVENTO DE SHUTDOWN - Ejecutado al cerrar la aplicación
-# Aquí se pueden limpiar recursos, cerrar conexiones, guardar estados, etc.
-# @app.on_event("shutdown")
-# async def shutdown_event():
-#     """
-#     Evento ejecutado al cerrar la aplicación.
-#     
-#     Aquí se pueden realizar tareas de limpieza como:
-#     - Cerrar conexiones a bases de datos
-#     - Finalizar pools de conexiones
-#     - Guardar estados temporales
-#     - Limpiar archivos temporales
-#     - Cerrar conexiones a servicios externos
-#     - Finalizar procesos en background
-#     
-#     Ejemplos de limpieza:
-#     - Cerrar conexiones Redis
-#     - Finalizar workers de background tasks
-#     - Guardar métricas finales
-#     - Limpiar cache temporal
-#     """
-#     # Ejemplo: Cerrar conexiones Redis
-#     # from app.core.cache import close_redis_connections
-#     # await close_redis_connections()
-#     
-#     # Ejemplo: Finalizar background tasks
-#     # from app.core.background import stop_background_workers
-#     # await stop_background_workers()
-#     
-#     # Ejemplo: Guardar métricas finales
-#     # from app.core.metrics import save_final_metrics
-#     # await save_final_metrics()
-#     
-#     pass
-
-# ========================================
-# CONFIGURACIÓN ADICIONAL FUTURA
-# ========================================
-
-# MIDDLEWARE: Aquí se pueden agregar middlewares personalizados
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=settings.ALLOWED_HOSTS,
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
-# EXCEPTION HANDLERS: Manejo global de excepciones
-# @app.exception_handler(ValidationError)
-# async def validation_exception_handler(request: Request, exc: ValidationError):
-#     return JSONResponse(
-#         status_code=422,
-#         content={"detail": exc.errors(), "body": exc.body},
-#     )
-
-# STATIC FILES: Servir archivos estáticos si es necesario
-# from fastapi.staticfiles import StaticFiles
-# app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# TEMPLATES: Configuración de templates si se usan
-# from fastapi.templating import Jinja2Templates
-# templates = Jinja2Templates(directory="templates")
