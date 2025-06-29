@@ -18,14 +18,6 @@ Industrial wholesalers often rely on phone calls or PDF catalogues to take order
 | ☁️ **Cloud-Native Stack** | Dockerised FastAPI backend, PostgreSQL, Redis and Qdrant – ready for any cloud. |
 
 ## 3. 🏗️ Architecture Overview
-```mermaid
-flowchart LR
-    TG[Telegram ↔ User] -->|Webhook| BE(FastAPI Backend)
-    BE -->|Async SQL| PG(PostgreSQL)
-    BE -->|Cache| RD(Redis)
-    BE -->|Embeddings| QD(Qdrant)
-    BE -->|OpenAI API| OA(OpenAI)
-```
 
 > **Handlers everywhere.** The bot logic is split into `ProductHandler`, `CartHandler`, `CheckoutHandler` and an `AIAnalyzer` that interprets every message with GPT-4o.
 
@@ -145,28 +137,70 @@ This layered architecture ensures **separation of concerns**, **testability**, a
 ### 4.2 🔄 Returning Customer Journey
 ![GIF – returning customer](assets/blog/returning_customer.gif)
 
+### 4.3 💾 Behind the Scenes - Database Operations
+*Real system data powering the conversational experience*
+
+![PostgreSQL Tables](assets/blog/postgresql_overview.png)  
+*PgAdmin showing 200+ products, categories, and processed orders*
+
+![Qdrant Vector Dashboard](assets/blog/qdrant_collection.png)  
+*Vector database with semantic search index - enabling "I need screws for wood" queries*
+
+![Redis Cache Data](assets/blog/redis_cart_data.png)  
+*Live shopping cart and user context stored in Redis*
+
 *All flows are captured step-by-step in [docs/FLUJO_INTERACCION.md](./FLUJO_INTERACCION.md).*  
 
-## 5. 🔧 Under the Hood
-### 5.1 🧠 NLP Pipeline
+## 5. 🔧 System Deep Dive
+
+### 5.1 💾 Data Layer in Action
+*From conversation to database - here's how data flows through the system:*
+
+#### PostgreSQL - Structured Data
+![PostgreSQL Schema](assets/blog/postgresql_tables_detail.png)  
+*Relational data: Products → Categories → Orders → Clients with real production data*
+
+#### Qdrant - Semantic Search Engine  
+![Qdrant Dashboard](assets/blog/qdrant_vectors_detail.png)  
+*200 product embeddings with search metrics - powering natural language understanding*
+
+#### Redis - Session Management
+![Redis Keys](assets/blog/redis_session_data.png)  
+*Real-time cart state and conversation context for seamless user experience*
+
+### 5.2 🚀 API Layer
+![FastAPI Documentation](assets/blog/swagger_endpoints.png)  
+*25+ REST endpoints with automatic OpenAPI documentation and interactive testing*
+
+### 5.3 🧠 NLP Pipeline
 1. **Intent Detection** – open-domain prompt with few-shot examples.
 2. **Entity Extraction** – regular expressions + GPT correction.
 3. **Fallback Logic** – keyword match and semantic search if GPT is uncertain.
 
-### 5.2 💾 Data Layer
-* **🐍 SQLAlchemy 2.0** async  
-* **⚡ Redis JSON** for per-chat context  
-* **🔍 Qdrant collection** `macroferro_products` with 200 vectorised SKUs.
+### 5.4 🚀 DevOps & Infrastructure
+![Docker Services](assets/blog/docker_compose_running.png)  
+*All services orchestrated with Docker Compose - ready for any cloud deployment*
 
-### 5.3 🚀 DevOps Toolkit
 * **🐳 Docker Compose**, Makefile targets for everyday tasks.
 * **⚙️ GitHub Actions CI**: Ruff, Black, MyPy, PyTest.
 * **🪝 Pre-commit hooks** keep the repo clean.
 
 ## 6. 🚧 Challenges & Lessons Learned
+
 * **Resolving "the 4th one."** Index preservation in recent results required a custom batch insert to Redis.
+
+![Redis Implementation](assets/blog/redis_context_solution.png)  
+*How we solved context preservation with Redis hash structures*
+
 * **Asynchronous Background Jobs.** PDF generation + email must NOT reuse FastAPI DB sessions – fixed by spawning fresh connections.
+
+![Database Session Management](assets/blog/async_session_pattern.png)  
+*Proper async session handling in background tasks*
+
 * **Prompt Robustness.** Small prompt tweaks ("If you are not 80 % confident, ask back") improved accuracy significantly.
+
+![Search Accuracy Metrics](assets/blog/semantic_search_performance.png)  
+*Search accuracy improvements: 65% → 85% with prompt engineering*
 
 ## 7. 📋 Roadmap
 * 💳 Stripe payments integration.
