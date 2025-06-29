@@ -112,6 +112,24 @@ shell-redis: ## 🐚 Acceso shell a Redis
 	@echo "$(YELLOW)🐚 Accediendo a Redis...$(NC)"
 	docker exec -it $(REDIS_CONTAINER) redis-cli
 
+redis-cache: ## 🔍 Inspeccionar cache de Redis
+	@echo "$(YELLOW)🔍 Inspeccionando cache de Redis...$(NC)"
+	python scripts/debug_redis_cache.py
+
+redis-keys: ## 🔑 Ver todas las keys de Redis
+	@echo "$(YELLOW)🔑 Keys en Redis:$(NC)"
+	docker exec -it $(REDIS_CONTAINER) redis-cli KEYS "*"
+
+redis-carts: ## 🛒 Ver carritos activos en Redis
+	@echo "$(YELLOW)🛒 Carritos activos:$(NC)"
+	docker exec -it $(REDIS_CONTAINER) redis-cli KEYS "cart:*"
+
+redis-flush: ## 🧹 Limpiar toda la cache de Redis (CUIDADO)
+	@echo "$(RED)⚠️ ATENCIÓN: Esto eliminará TODA la cache de Redis$(NC)"
+	@read -p "¿Estás seguro? [y/N]: " confirm && [ "$$confirm" = "y" ]
+	docker exec -it $(REDIS_CONTAINER) redis-cli FLUSHALL
+	@echo "$(GREEN)✅ Cache de Redis limpiada$(NC)"
+
 ## 🧹 Limpieza
 clean: ## 🧹 Limpiar contenedores, imágenes y volúmenes
 	@echo "$(YELLOW)🧹 Limpiando recursos Docker...$(NC)"
